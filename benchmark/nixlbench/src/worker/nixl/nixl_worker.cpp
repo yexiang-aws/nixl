@@ -18,6 +18,7 @@
 #include "worker/nixl/nixl_worker.h"
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
 #include <cstring>
 #if HAVE_CUDA
 #include <cuda.h>
@@ -376,16 +377,51 @@ xferBenchNixlWorker::initBasicDescDram(size_t buffer_size, int mem_dev_id) {
         return std::nullopt;
     }
 
+    // Dump buffer content after allocation
+    std::cout << "=== DRAM BUFFER ALLOCATED ===" << std::endl;
+    std::cout << "addr=" << std::hex << (uintptr_t)addr << std::dec << " len=" << buffer_size << " devId=" << mem_dev_id << " content: ";
+    uint8_t* buf = reinterpret_cast<uint8_t*>(addr);
+    for (size_t k = 0; k < buffer_size; ++k) {
+        std::cout << std::hex << static_cast<unsigned>(buf[k]) << std::dec;
+    }
+    std::cout << std::endl;
+
     // TODO: Does device id need to be set for DRAM?
     return std::optional<xferBenchIOV>(std::in_place, (uintptr_t)addr, buffer_size, mem_dev_id);
 }
 
 #if HAVE_CUDA
 static std::optional<xferBenchIOV>
-getVramDescCuda(int devid, size_t buffer_size, uint8_t memset_value) {
+getVramDescCuda(int devid, size_t buffer_size, uint8_t memset_value, bool isInit) {
     void *addr;
     CHECK_CUDA_ERROR(cudaMalloc(&addr, buffer_size), "Failed to allocate CUDA buffer");
     CHECK_CUDA_ERROR(cudaMemset(addr, memset_value, buffer_size), "Failed to set device memory");
+    
+    // if it's target side
+    if (!isInit) {
+        // Prepare host data
+        std::vector<uint8_t> h_data(buffer_size);
+        for(size_t i = 0; i < buffer_size; i++) {
+            h_data[i] = i + 8;
+        }
+
+        // Copy to device
+        cudaMemcpy(addr, h_data.data(), buffer_size * sizeof(uint8_t), cudaMemcpyHostToDevice);
+    }
+
+    // Dump buffer content after allocation
+    std::cout << "=== VRAM BUFFER ALLOCATED ===" << std::endl;
+    std::cout << "addr=" << std::hex << (uintptr_t)addr << std::dec << " len=" << buffer_size << " devId=" << devid << " content: ";
+    std::vector<uint8_t> cpu_buf(buffer_size);
+    cudaError_t err = cudaMemcpy(cpu_buf.data(), addr, buffer_size, cudaMemcpyDeviceToHost);
+    if (err == cudaSuccess) {
+        for (size_t k = 0; k < buffer_size; ++k) {
+            std::cout << std::hex << std::setfill('0') << std::setw(2) << static_cast<unsigned>(cpu_buf[k]) << std::setfill(' ') << std::dec;
+        }
+    } else {
+        std::cout << "[CUDA copy failed: " << cudaGetErrorString(err) << "]";
+    }
+    std::cout << std::endl;
 
     return std::optional<xferBenchIOV>(std::in_place, (uintptr_t)addr, buffer_size, devid);
 }
@@ -453,7 +489,7 @@ getVramDesc(int devid, size_t buffer_size, bool isInit) {
     if (xferBenchConfig::enable_vmm) {
         return getVramDescCudaVmm(devid, buffer_size, memset_value);
     } else {
-        return getVramDescCuda(devid, buffer_size, memset_value);
+        return getVramDescCuda(devid, buffer_size, memset_value, isInit);
     }
 }
 

@@ -17,6 +17,7 @@
 
 #include "config.h"
 #include <iostream>
+#include <iomanip>
 #include <nixl.h>
 #include <sys/time.h>
 #include <gflags/gflags.h>
@@ -122,7 +123,121 @@ static int processBatchSizes(xferBenchWorker &worker,
             }
 
             worker.exchangeIOV(local_trans_lists, block_size);
+
+            // Print buffer content before transfer
+            std::cout << "=== BEFORE TRANSFER ===" << std::endl;
+            for (size_t i = 0; i < local_trans_lists.size(); ++i) {
+                for (size_t j = 0; j < local_trans_lists[i].size(); ++j) {
+                    const auto& desc = local_trans_lists[i][j];
+
+                    std::cout << "Local[" << i << "][" << j << "] addr=" << std::hex << desc.addr << std::dec 
+                              << " len=" << desc.len << " devId=" << desc.devId << " content: ";
+                    
+                    // Check if it's GPU memory and copy to CPU for reading
+                    size_t read_size = desc.len;
+                    std::vector<uint8_t> cpu_buf(read_size);
+                    
+#if HAVE_CUDA
+                    if (desc.devId >= 0) { // GPU memory
+                        cudaError_t err = cudaMemcpy(cpu_buf.data(), reinterpret_cast<void*>(desc.addr), read_size, cudaMemcpyDeviceToHost);
+                        if (err == cudaSuccess) {
+                            for (size_t k = 0; k < read_size; ++k) {
+                                std::cout << std::hex << static_cast<unsigned>(cpu_buf[k]) << std::dec;
+                                if (k < read_size - 1) std::cout << " ";
+                            }
+                        } else {
+                            std::cout << "[CUDA copy failed: " << cudaGetErrorString(err) << "]";
+                        }
+                    } else
+#endif
+                    { // CPU memory
+                        uint8_t* buf = reinterpret_cast<uint8_t*>(desc.addr);
+                        for (size_t k = 0; k < read_size; ++k) {
+                            std::cout << std::hex << static_cast<unsigned>(buf[k]) << std::dec;
+                            if (k < read_size - 1) std::cout << " ";
+                        }
+                    }
+                    std::cout << std::endl;
+                }  
+            }
+
+#if HAVE_CUDA
+// IOV buffer data
+            for (size_t i = 0; i < iov_lists.size(); ++i) {
+                size_t iov_list_len = iov_lists[0][0].len;
+                std::vector<uint8_t> cpu_buf_iov(iov_list_len);
+                for (size_t j = 0; j < iov_lists[0].size(); j++) {
+                    cudaError_t err = cudaMemcpy(cpu_buf_iov.data(), reinterpret_cast<void*>(iov_lists[i][j].addr), iov_list_len, cudaMemcpyDeviceToHost);
+                    if (err == cudaSuccess) {
+                        for (size_t k = 0; k < iov_list_len; ++k) {
+                            std::cout << std::hex << std::setfill('0') << std::setw(2) << static_cast<unsigned>(cpu_buf_iov[k]) << std::setfill(' ') << std::dec;
+                        }
+                    } else {
+                        std::cout << "[CUDA copy failed: " << cudaGetErrorString(err) << "]";
+                    }
+                }
+                std::cout << " ";
+            }
+            std::cout << std::endl;
+#endif
+
+
             worker.poll(block_size);
+
+            // Print buffer content after transfer
+            std::cout << "=== AFTER TRANSFER ===" << std::endl;
+            for (size_t i = 0; i < local_trans_lists.size(); ++i) {
+                for (size_t j = 0; j < local_trans_lists[i].size(); ++j) {
+                    const auto& desc = local_trans_lists[i][j];
+                    std::cout << "Local[" << i << "][" << j << "] addr=" << std::hex << desc.addr << std::dec 
+                              << " len=" << desc.len << " devId=" << desc.devId << " content: ";
+                    
+                    // Check if it's GPU memory and copy to CPU for reading
+                    size_t read_size = desc.len;
+                    std::vector<uint8_t> cpu_buf(read_size);
+                    
+#if HAVE_CUDA
+                    if (desc.devId >= 0) { // GPU memory
+                        cudaError_t err = cudaMemcpy(cpu_buf.data(), reinterpret_cast<void*>(desc.addr), read_size, cudaMemcpyDeviceToHost);
+                        if (err == cudaSuccess) {
+                            for (size_t k = 0; k < read_size; ++k) {
+                                std::cout << std::hex << static_cast<unsigned>(cpu_buf[k]) << std::dec;
+                                if (k < read_size - 1) std::cout << " ";
+                            }
+                        } else {
+                            std::cout << "[CUDA copy failed: " << cudaGetErrorString(err) << "]";
+                        }
+                    } else
+#endif
+                    { // CPU memory
+                        uint8_t* buf = reinterpret_cast<uint8_t*>(desc.addr);
+                        for (size_t k = 0; k < read_size; ++k) {
+                            std::cout << std::hex << static_cast<unsigned>(buf[k]) << std::dec;
+                            if (k < read_size - 1) std::cout << " ";
+                        }
+                    }
+                    std::cout << std::endl;
+                }
+            }
+#if HAVE_CUDA
+// IOV buffer data
+            for (size_t i = 0; i < iov_lists.size(); ++i) {
+                size_t iov_list_len = iov_lists[0][0].len;
+                std::vector<uint8_t> cpu_buf_iov(iov_list_len);
+                for (size_t j = 0; j < iov_lists[0].size(); j++) {
+                    cudaError_t err = cudaMemcpy(cpu_buf_iov.data(), reinterpret_cast<void*>(iov_lists[i][j].addr), iov_list_len, cudaMemcpyDeviceToHost);
+                    if (err == cudaSuccess) {
+                        for (size_t k = 0; k < iov_list_len; ++k) {
+                            std::cout << std::hex << std::setfill('0') << std::setw(2) << static_cast<unsigned>(cpu_buf_iov[k]) << std::setfill(' ') << std::dec;
+                        }
+                    } else {
+                        std::cout << "[CUDA copy failed: " << cudaGetErrorString(err) << "]";
+                    }
+                    std::cout << " ";
+                }
+            }
+            std::cout << std::endl;
+#endif
 
             if (xferBenchConfig::check_consistency && xferBenchConfig::op_type == XFERBENCH_OP_WRITE) {
                 xferBenchUtils::checkConsistency(local_trans_lists);
@@ -135,8 +250,121 @@ static int processBatchSizes(xferBenchWorker &worker,
         } else if (worker.isInitiator()) {
             std::vector<std::vector<xferBenchIOV>> remote_trans_lists(
                 worker.exchangeIOV(local_trans_lists, block_size));
+            
+            // Print buffer content before transfer
+            std::cout << "=== BEFORE TRANSFER ===" << std::endl;
+            for (size_t i = 0; i < local_trans_lists.size(); ++i) {
+                for (size_t j = 0; j < local_trans_lists[i].size(); ++j) {
+                    const auto& desc = local_trans_lists[i][j];
+
+                    std::cout << "Local[" << i << "][" << j << "] addr=" << std::hex << desc.addr << std::dec 
+                              << " len=" << desc.len << " devId=" << desc.devId << " content: ";
+                    
+                    // Check if it's GPU memory and copy to CPU for reading
+                    size_t read_size = desc.len;
+                    std::vector<uint8_t> cpu_buf(read_size);
+                    
+#if HAVE_CUDA
+                    if (desc.devId >= 0) { // GPU memory
+                        cudaError_t err = cudaMemcpy(cpu_buf.data(), reinterpret_cast<void*>(desc.addr), read_size, cudaMemcpyDeviceToHost);
+                        if (err == cudaSuccess) {
+                            for (size_t k = 0; k < read_size; ++k) {
+                                std::cout << std::hex << static_cast<unsigned>(cpu_buf[k]) << std::dec;
+                                if (k < read_size - 1) std::cout << " ";
+                            }
+                        } else {
+                            std::cout << "[CUDA copy failed: " << cudaGetErrorString(err) << "]";
+                        }
+                    } else
+#endif
+                    { // CPU memory
+                        uint8_t* buf = reinterpret_cast<uint8_t*>(desc.addr);
+                        for (size_t k = 0; k < read_size; ++k) {
+                            std::cout << std::hex << static_cast<unsigned>(buf[k]) << std::dec;
+                            if (k < read_size - 1) std::cout << " ";
+                        }
+                    }
+                    std::cout << std::endl;
+                }  
+            }
+
+#if HAVE_CUDA
+// IOV buffer data
+            for (size_t i = 0; i < iov_lists.size(); ++i) {
+                size_t iov_list_len = iov_lists[0][0].len;
+                std::vector<uint8_t> cpu_buf_iov(iov_list_len);
+                for (size_t j = 0; j < iov_lists[0].size(); j++) {
+                    cudaError_t err = cudaMemcpy(cpu_buf_iov.data(), reinterpret_cast<void*>(iov_lists[i][j].addr), iov_list_len, cudaMemcpyDeviceToHost);
+                    if (err == cudaSuccess) {
+                        for (size_t k = 0; k < iov_list_len; ++k) {
+                            std::cout << std::hex << std::setfill('0') << std::setw(2) << static_cast<unsigned>(cpu_buf_iov[k]) << std::setfill(' ') << std::dec;
+                        }
+                    } else {
+                        std::cout << "[CUDA copy failed: " << cudaGetErrorString(err) << "]";
+                    }
+                }
+                std::cout << " ";
+            }
+            std::cout << std::endl;
+#endif
 
             auto result = worker.transfer(block_size, local_trans_lists, remote_trans_lists);
+
+            // Print buffer content after transfer
+            std::cout << "=== AFTER TRANSFER ===" << std::endl;
+            for (size_t i = 0; i < local_trans_lists.size(); ++i) {
+                for (size_t j = 0; j < local_trans_lists[i].size(); ++j) {
+                    const auto& desc = local_trans_lists[i][j];
+                    std::cout << "Local[" << i << "][" << j << "] addr=" << std::hex << desc.addr << std::dec 
+                              << " len=" << desc.len << " devId=" << desc.devId << " content: ";
+                    
+                    // Check if it's GPU memory and copy to CPU for reading
+                    size_t read_size = desc.len;
+                    std::vector<uint8_t> cpu_buf(read_size);
+                    
+#if HAVE_CUDA
+                    if (desc.devId >= 0) { // GPU memory
+                        cudaError_t err = cudaMemcpy(cpu_buf.data(), reinterpret_cast<void*>(desc.addr), read_size, cudaMemcpyDeviceToHost);
+                        if (err == cudaSuccess) {
+                            for (size_t k = 0; k < read_size; ++k) {
+                                std::cout << std::hex << static_cast<unsigned>(cpu_buf[k]) << std::dec;
+                                if (k < read_size - 1) std::cout << " ";
+                            }
+                        } else {
+                            std::cout << "[CUDA copy failed: " << cudaGetErrorString(err) << "]";
+                        }
+                    } else
+#endif
+                    { // CPU memory
+                        uint8_t* buf = reinterpret_cast<uint8_t*>(desc.addr);
+                        for (size_t k = 0; k < read_size; ++k) {
+                            std::cout << std::hex << static_cast<unsigned>(buf[k]) << std::dec;
+                            if (k < read_size - 1) std::cout << " ";
+                        }
+                    }
+                    std::cout << std::endl;
+                }
+            }
+#if HAVE_CUDA
+// IOV buffer data
+            for (size_t i = 0; i < iov_lists.size(); ++i) {
+                size_t iov_list_len = iov_lists[0][0].len;
+                std::vector<uint8_t> cpu_buf_iov(iov_list_len);
+                for (size_t j = 0; j < iov_lists[0].size(); j++) {
+                    cudaError_t err = cudaMemcpy(cpu_buf_iov.data(), reinterpret_cast<void*>(iov_lists[i][j].addr), iov_list_len, cudaMemcpyDeviceToHost);
+                    if (err == cudaSuccess) {
+                        for (size_t k = 0; k < iov_list_len; ++k) {
+                            std::cout << std::hex << std::setfill('0') << std::setw(2) << static_cast<unsigned>(cpu_buf_iov[k]) << std::setfill(' ') << std::dec;
+                        }
+                    } else {
+                        std::cout << "[CUDA copy failed: " << cudaGetErrorString(err) << "]";
+                    }
+                    std::cout << " ";
+                }
+            }
+            std::cout << std::endl;
+#endif
+
             if (std::holds_alternative<int>(result)) {
                 return 1;
             }
