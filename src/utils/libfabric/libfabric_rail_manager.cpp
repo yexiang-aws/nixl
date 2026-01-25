@@ -37,8 +37,10 @@ resetSeqId();
 static std::atomic<size_t> round_robin_counter{0};
 static const std::string NUM_RAILS_TAG{"num_rails"};
 
-nixlLibfabricRailManager::nixlLibfabricRailManager(size_t striping_threshold)
+nixlLibfabricRailManager::nixlLibfabricRailManager(size_t striping_threshold,
+                                                   bool use_first_device_only)
     : striping_threshold_(striping_threshold),
+      use_first_device_only_(use_first_device_only),
       runtime_(FI_HMEM_CUDA) {
     NIXL_DEBUG << "Creating rail manager with striping threshold: " << striping_threshold_
                << " bytes";
@@ -68,15 +70,22 @@ nixlLibfabricRailManager::nixlLibfabricRailManager(size_t striping_threshold)
     NIXL_DEBUG << "Got " << all_devices.size()
                << " network devices from topology for provider=" << selected_provider_name;
 
-    // Create data rails with selected provider - throw on failure
-    nixl_status_t rail_status = createDataRails(all_devices, selected_provider_name);
+    // Apply device filtering if enabled
+    std::vector<std::string> devices_to_use = filterDeviceList(all_devices);
+    
+    if (devices_to_use.empty()) {
+        throw std::runtime_error("No devices available after filtering");
+    }
+
+    // Create data rails with filtered device list - throw on failure
+    nixl_status_t rail_status = createDataRails(devices_to_use, selected_provider_name);
     if (rail_status != NIXL_SUCCESS) {
         throw std::runtime_error("Failed to create data rails for libfabric rail manager");
     }
 
-    // Create control rails with selected provider - throw on failure
+    // Create control rails with filtered device list - throw on failure
     nixl_status_t control_rail_status = createControlRails(
-        all_devices, selected_provider_name, NIXL_LIBFABRIC_DEFAULT_CONTROL_RAILS);
+        devices_to_use, selected_provider_name, NIXL_LIBFABRIC_DEFAULT_CONTROL_RAILS);
     if (control_rail_status != NIXL_SUCCESS) {
         throw std::runtime_error("Failed to create control rails for libfabric rail manager");
     }
@@ -88,6 +97,23 @@ nixlLibfabricRailManager::nixlLibfabricRailManager(size_t striping_threshold)
 
 nixlLibfabricRailManager::~nixlLibfabricRailManager() {
     NIXL_DEBUG << "Destroying rail manager";
+}
+
+std::vector<std::string>
+nixlLibfabricRailManager::filterDeviceList(const std::vector<std::string> &all_devices) {
+    if (all_devices.empty()) {
+        NIXL_ERROR << "No devices available";
+        return {};
+    }
+
+    if (!use_first_device_only_) {
+        NIXL_DEBUG << "Using all " << all_devices.size() << " devices";
+        return all_devices;
+    }
+
+    // Filter to first device only
+    NIXL_WARN << "Using first device only: '" << "rdmap79s0-rdm" << "'";
+    return {"rdmap79s0-rdm"};
 }
 
 nixl_status_t

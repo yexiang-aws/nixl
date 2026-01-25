@@ -287,11 +287,34 @@ nixlLibfabricBackendH::is_completed() const {
  * Constructor/Destructor
  *****************************************/
 
+namespace {
+// Helper function to parse use_first_device_only parameter before initializer list
+bool
+parseUseFirstDeviceOnly(const nixlBackendInitParams *init_params) {
+    if (!init_params || !init_params->customParams) {
+        return false;
+    }
+    
+    const auto &params = *init_params->customParams;
+    auto param_it = params.find("use_first_device_only");
+    if (param_it != params.end()) {
+        const std::string &value = param_it->second;
+        bool result = (value == "true" || value == "1");
+        NIXL_INFO << "Parsed use_first_device_only parameter: " << result;
+        return result;
+    }
+    
+    NIXL_INFO << "use_first_device_only parameter not provided, using default: true";
+    return true;
+}
+} // anonymous namespace
+
 nixlLibfabricEngine::nixlLibfabricEngine(const nixlBackendInitParams *init_params)
     : nixlBackendEngine(init_params),
       progress_thread_enabled_(init_params->enableProgTh),
       progress_thread_delay_(std::chrono::microseconds(init_params->pthrDelay)),
-      rail_manager(NIXL_LIBFABRIC_DEFAULT_STRIPING_THRESHOLD),
+      use_first_device_only_(parseUseFirstDeviceOnly(init_params)),
+      rail_manager(NIXL_LIBFABRIC_DEFAULT_STRIPING_THRESHOLD, use_first_device_only_),
       runtime_(FI_HMEM_SYSTEM) {
 
     NIXL_DEBUG << "Initializing Libfabric Backend";
@@ -335,6 +358,8 @@ nixlLibfabricEngine::nixlLibfabricEngine(const nixlBackendInitParams *init_param
     } else {
         NIXL_DEBUG << "Using default striping threshold: " << striping_threshold_ << " bytes";
     }
+
+    NIXL_DEBUG << "use_first_device_only parameter set to: " << use_first_device_only_;
 
     // Initialize Rail Manager which will discover the topology and create all rails.
     try {

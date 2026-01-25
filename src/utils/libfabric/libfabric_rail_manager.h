@@ -41,9 +41,10 @@ public:
     /** Initialize rail manager with topology discovery and create rails based on available
      * network devices
      * @param striping_threshold Size threshold for enabling multi-rail striping
+     * @param use_first_device_only If true, limit to first detected device only (default: false)
      * @throws std::runtime_error if initialization fails
      */
-    nixlLibfabricRailManager(size_t striping_threshold);
+    nixlLibfabricRailManager(size_t striping_threshold, bool use_first_device_only = false);
     /** Destroy rail manager and cleanup all resources */
     ~nixlLibfabricRailManager();
 
@@ -310,6 +311,7 @@ public:
 
 private:
     size_t striping_threshold_;
+    bool use_first_device_only_;
 
     // System runtime type (determined once at initialization)
     fi_hmem_iface runtime_;
@@ -336,6 +338,15 @@ private:
                          nixl_mem_t mem_type,
                          int device_id,
                          const std::string &pci_bus_id = "") const;
+
+    // Device filtering method
+    /**
+     * Filter device list based on configuration
+     * @param all_devices Complete list of discovered devices
+     * @return Filtered device list (first device only if enabled, all devices otherwise)
+     */
+    std::vector<std::string>
+    filterDeviceList(const std::vector<std::string> &all_devices);
 
     // Helper functions for connection SerDes
     void

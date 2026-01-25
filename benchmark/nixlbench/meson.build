@@ -33,6 +33,9 @@ cuda_stub_path = get_option('cudapath_stub')
 # ETCD
 etcd_inc_path = get_option('etcd_inc_path')
 etcd_lib_path = get_option('etcd_lib_path')
+# CPPRESTSDK / TODO: remove this additional paths requirement
+cpprestsdk_inc_path = get_option('cpprestsdk_inc_path')
+cpprestsdk_lib_path = get_option('cpprestsdk_lib_path')
 # NIXL
 nixl_path = get_option('nixl_path')
 # NVSHMEM
@@ -106,8 +109,34 @@ endif
 # OpenMP
 openmp_dep = dependency('openmp', required: true)
 
+# cpprestsdk (required by etcd-cpp-api)
+cpprestsdk_dep = dependency('cpprestsdk', required: false)
+if not cpprestsdk_dep.found()
+    # Try to find it manually in the install directory only if paths are provided
+    if cpprestsdk_lib_path != '' and cpprestsdk_inc_path != ''
+        cpprestsdk_lib = cpp.find_library('cpprest', dirs: [cpprestsdk_lib_path], required: false)
+        if cpprestsdk_lib.found()
+            cpprestsdk_dep = declare_dependency(
+                include_directories : include_directories(cpprestsdk_inc_path, is_system: true),
+                dependencies : cpprestsdk_lib)
+        endif
+    endif
+endif
+
 # Check for etcd-cpp-api - use multiple methods for discovery
 etcd_dep = dependency('etcd-cpp-api', required : false)
+
+if not etcd_dep.found() and etcd_lib_path != ''
+    etcd_lib = cpp.find_library('etcd-cpp-api', dirs: [etcd_lib_path])
+    if etcd_lib.found()
+        if cpp.has_header('etcd/Client.hpp', args : '-I' + etcd_inc_path)
+            etcd_inc = include_directories(etcd_inc_path, is_system: true)
+            etcd_dep = declare_dependency(
+                        include_directories : etcd_inc,
+                        dependencies : etcd_lib)
+        endif
+    endif
+endif
 
 # Check for cxxopts
 cxxopts_dep = dependency('cxxopts', required: true)
@@ -172,7 +201,7 @@ configure_file(
 deps = [nixl_lib, nixl_build, nixl_serdes, openmp_dep, cxxopts_dep, tomlplusplus_dep]
 args = []
 if etcd_available
-    deps += [etcd_dep]
+    deps += [etcd_dep, cpprestsdk_dep]
 endif
 if cuda_available
     deps += [cuda_dep]
