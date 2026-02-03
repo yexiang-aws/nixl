@@ -431,7 +431,7 @@ nixlLibfabricRail::nixlLibfabricRail(const std::string &device,
         hints->domain_attr->mr_key_size = 2;
     }
     hints->domain_attr->name = strdup(device_name.c_str());
-    hints->domain_attr->threading = FI_THREAD_SAFE;
+    hints->domain_attr->threading = FI_THREAD_COMPLETION;
 
     try {
         // Get fabric info for this specific device - first try with FI_HMEM
