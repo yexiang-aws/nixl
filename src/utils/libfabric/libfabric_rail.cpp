@@ -755,7 +755,9 @@ nixlLibfabricRail::progressCompletionQueue() const {
             }
         }
 
-        NIXL_DEBUG << "Processed " << ret << " completions on rail " << rail_id;
+        NIXL_DEBUG << "Completion processed on rail " << rail_id
+                   << " (data_inflight: " << getDataInflightCount()
+                   << ", ctrl_inflight: " << getControlInflightCount() << ")";
         return NIXL_SUCCESS;
     }
 
@@ -1038,9 +1040,10 @@ nixlLibfabricRail::postSend(uint64_t immediate_data,
 
         if (ret == 0) {
             // Success
-            NIXL_TRACE << "Send posted successfully"
-                       << (attempt > 0 ? " after " + std::to_string(attempt + 1) + " attempts" :
-                                         "");
+            NIXL_DEBUG << "Send posted successfully"
+                       << (attempt > 0 ? " after " + std::to_string(attempt + 1) + " attempts" : "")
+                       << " (data_inflight: " << getDataInflightCount()
+                       << ", ctrl_inflight: " << getControlInflightCount() << ")";
             return NIXL_SUCCESS;
         }
 
@@ -1117,9 +1120,10 @@ nixlLibfabricRail::postWrite(const void *local_buffer,
 
         if (ret == 0) {
             // Success
-            NIXL_TRACE << "RDMA write posted successfully"
-                       << (attempt > 0 ? " after " + std::to_string(attempt + 1) + " attempts" :
-                                         "");
+            NIXL_DEBUG << "RDMA write posted successfully"
+                       << (attempt > 0 ? " after " + std::to_string(attempt + 1) + " attempts" : "")
+                       << " (data_inflight: " << getDataInflightCount()
+                       << ", ctrl_inflight: " << getControlInflightCount() << ")";
             return NIXL_SUCCESS;
         }
 
@@ -1132,7 +1136,7 @@ nixlLibfabricRail::postWrite(const void *local_buffer,
                 NIXL_INFO << "fi_writedata still retrying EAGAIN on rail " << rail_id << " after "
                           << attempt << " attempts";
             } else {
-                NIXL_TRACE << "fi_writedata returned EAGAIN on rail " << rail_id
+                NIXL_TRACE << "in  returned EAGAIN on rail " << rail_id
                            << ", retrying (attempt " << attempt << ")";
             }
 
@@ -1194,9 +1198,10 @@ nixlLibfabricRail::postRead(void *local_buffer,
 
         if (ret == 0) {
             // Success
-            NIXL_TRACE << "RDMA read posted successfully"
-                       << (attempt > 0 ? " after " + std::to_string(attempt + 1) + " attempts" :
-                                         "");
+            NIXL_DEBUG << "RDMA read posted successfully"
+                       << (attempt > 0 ? " after " + std::to_string(attempt + 1) + " attempts" : "")
+                       << " (data_inflight: " << getDataInflightCount()
+                       << ", ctrl_inflight: " << getControlInflightCount() << ")";
             return NIXL_SUCCESS;
         }
 
