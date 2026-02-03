@@ -758,7 +758,8 @@ nixlLibfabricRail::progressCompletionQueue() const {
             return status;
         }
 
-        NIXL_DEBUG << "Completion processed on rail " << rail_id;
+        NIXL_DEBUG << "Completion processed on rail " << rail_id
+                   << " (inflight: " << getInflightCount() << ")";
         return NIXL_SUCCESS;
     }
 

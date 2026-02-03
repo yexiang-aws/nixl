@@ -359,6 +359,13 @@ public:
     fi_info *
     getRailInfo() const;
 
+    /** Get total inflight request count for performance monitoring */
+    size_t
+    getInflightCount() const {
+        return control_request_pool_.getActiveRequestCount() + 
+               data_request_pool_.getActiveRequestCount();
+    }
+
 private:
     // Core libfabric resources
     struct fi_info *info; // from rail_infos[rail_id]
