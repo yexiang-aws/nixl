@@ -1275,8 +1275,9 @@ nixlLibfabricRail::registerMemory(void *buffer,
         // Use the lower bits of the buffer address as a simple unique identifier
         requested_key = reinterpret_cast<uintptr_t>(buffer) & 0xFFFFFFFF;
 
-        NIXL_DEBUG << "TCP provider=using requested key " << requested_key << " for buffer "
-                   << buffer << " on rail " << rail_id;
+        NIXL_DEBUG << "TCP provider=using requested key " << requested_key << " (" << std::hex
+                   << requested_key << std::dec << ") for buffer " << buffer << " on rail "
+                   << rail_id;
     }
 
     NIXL_TRACE << "Memory Registration: rail=" << rail_id << " provider=" << provider_name
