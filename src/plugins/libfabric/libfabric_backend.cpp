@@ -1391,6 +1391,8 @@ nixlLibfabricEngine::genNotif(const std::string &remote_agent, const std::string
 
 nixl_status_t
 nixlLibfabricEngine::getNotifs(notif_list_t &notif_list) {
+
+    NIXL_DEBUG << "YE: getNotifs called";
     if (!progress_thread_enabled_) {
         nixl_status_t progress_status = rail_manager.progressActiveDataRails();
         if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
