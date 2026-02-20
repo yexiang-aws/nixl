@@ -1392,7 +1392,12 @@ nixlLibfabricEngine::genNotif(const std::string &remote_agent, const std::string
 nixl_status_t
 nixlLibfabricEngine::getNotifs(notif_list_t &notif_list) {
 
-    NIXL_DEBUG << "YE: getNotifs called";
+    static uint64_t call_count = 0;
+    if ((call_count & (call_count - 1)) == 0) {  // Power of 2
+        NIXL_DEBUG << "YE: getNotifs called (count=" << call_count << ")";
+    }
+    call_count++;
+    
     if (!progress_thread_enabled_) {
         nixl_status_t progress_status = rail_manager.progressActiveDataRails();
         if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
@@ -1400,11 +1405,13 @@ nixlLibfabricEngine::getNotifs(notif_list_t &notif_list) {
             return progress_status;
         }
     }
-
-    nixl_status_t progress_status = rail_manager.progressAllControlRails();
-    if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
-        NIXL_ERROR << "Failed to progress control rails in getNotifs.";
-        return progress_status;
+    
+    if (!progress_thread_enabled_) {
+        nixl_status_t progress_status = rail_manager.progressAllControlRails();
+        if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
+            NIXL_ERROR << "Failed to progress control rails in getNotifs.";
+            return progress_status;
+        }    
     }
 
     // Then check for available notifications after processing completions
@@ -1447,6 +1454,17 @@ nixlLibfabricEngine::progressThread() {
             NIXL_DEBUG << "PT: Processed completions on data rails";
         } else if (status != NIXL_IN_PROG && status != NIXL_SUCCESS) {
             NIXL_ERROR << "PT: Failed to process completions on data rails";
+            // Don't return error, continue for robustness
+        }
+        if (!any_completions) {
+            std::this_thread::sleep_for(progress_thread_delay_);
+        }
+        status = rail_manager.progressAllControlRails();
+        if (status == NIXL_SUCCESS) {
+            any_completions = true;
+            NIXL_DEBUG << "PT: Processed completions on control rail 0";
+        } else if (status != NIXL_IN_PROG && status != NIXL_SUCCESS) {
+            NIXL_ERROR << "PT: Failed to process completions on control rail 0";
             // Don't return error, continue for robustness
         }
         if (!any_completions) {

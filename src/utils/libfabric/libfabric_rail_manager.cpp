@@ -690,7 +690,11 @@ nixlLibfabricRailManager::progressActiveDataRails() {
 nixl_status_t
 nixlLibfabricRailManager::progressAllControlRails() {
     bool any_completions = false;
-    NIXL_DEBUG << "YE: progressAllControlRails";
+    static uint64_t call_count = 0;
+    if ((call_count & (call_count - 1)) == 0) {  // Power of 2
+        NIXL_DEBUG << "YE: progressAllControlRails (count=" << call_count << ")";
+    }
+    call_count++;
 
     for (size_t rail_id = 0; rail_id < num_control_rails_; ++rail_id) {
         nixl_status_t status = control_rails_[rail_id]->progressCompletionQueue();
