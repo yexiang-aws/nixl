@@ -994,7 +994,7 @@ nixlLibfabricRail::postRecv(nixlLibfabricReq *req) const {
     msg.context = &req->ctx; // Use request's context directly
     msg.data = 0;
 
-    NIXL_TRACE << "Posting receive on endpoint=" << endpoint << " buffer=" << req->buffer
+    NIXL_DEBUG << "Posting receive on endpoint=" << endpoint << " buffer=" << req->buffer
                << " size=" << req->buffer_size << " context=" << &req->ctx;
 
     int ret = fi_recvmsg(endpoint, &msg, 0);
@@ -1020,7 +1020,7 @@ nixlLibfabricRail::postSend(uint64_t immediate_data,
     // Prepare descriptor
     void *desc = fi_mr_desc(req->mr);
 
-    NIXL_TRACE << "Sending data on endpoint=" << endpoint << " buffer=" << req->buffer
+    NIXL_DEBUG << "Sending data on endpoint=" << endpoint << " buffer=" << req->buffer
                << " size=" << req->buffer_size << " immediate_data=" << std::hex << immediate_data
                << " msg_type=" << NIXL_GET_MSG_TYPE_FROM_IMM(immediate_data)
                << " agent_idx=" << NIXL_GET_AGENT_INDEX_FROM_IMM(immediate_data)
@@ -1089,7 +1089,7 @@ nixlLibfabricRail::postWrite(const void *local_buffer,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    NIXL_TRACE << "Posting RDMA write on endpoint=" << endpoint << " local_buffer=" << local_buffer
+    NIXL_DEBUG << "Posting RDMA write on endpoint=" << endpoint << " local_buffer=" << local_buffer
                << " length=" << length << " immediate_data=" << immediate_data
                << " dest_addr=" << dest_addr << " remote_addr=" << (void *)remote_addr
                << " remote_key=" << remote_key << " context=" << &req->ctx;
@@ -1112,7 +1112,7 @@ nixlLibfabricRail::postWrite(const void *local_buffer,
 
         if (ret == 0) {
             // Success
-            NIXL_TRACE << "RDMA write posted successfully"
+            NIXL_DEBUG << "RDMA write posted successfully"
                        << (attempt > 0 ? " after " + std::to_string(attempt + 1) + " attempts" :
                                          "");
             return NIXL_SUCCESS;
@@ -1162,7 +1162,7 @@ nixlLibfabricRail::postRead(void *local_buffer,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    NIXL_TRACE << "Posting RDMA read on endpoint=" << std::hex << endpoint
+    NIXL_DEBUG << "Posting RDMA read on endpoint=" << std::hex << endpoint
                << " local_buffer=" << local_buffer << " length=" << length
                << " dest_addr=" << dest_addr << " remote_addr=" << (void *)remote_addr
                << " remote_key=" << remote_key << " context=" << &req->ctx;
@@ -1184,7 +1184,7 @@ nixlLibfabricRail::postRead(void *local_buffer,
 
         if (ret == 0) {
             // Success
-            NIXL_TRACE << "RDMA read posted successfully"
+            NIXL_DEBUG << "RDMA read posted successfully"
                        << (attempt > 0 ? " after " + std::to_string(attempt + 1) + " attempts" :
                                          "");
             return NIXL_SUCCESS;
