@@ -1376,6 +1376,20 @@ nixlLibfabricEngine::genNotif(const std::string &remote_agent, const std::string
     return notifSendPriv(remote_agent, notifications, total_msg_len, 0, 0);
 }
 
+/**
+ * @brief Retrieve pending notifications from the notification queue.
+ *
+ * This function progresses completion queues (if needed) and retrieves any
+ * pending notifications. It avoids competing with the progress thread by
+ * conditionally progressing rails based on thread state:
+ *
+ * - Data rails: Progressed only if progress thread is disabled
+ * - Control rails: Progressed only if progress thread is disabled OR not handling them
+ *
+ * @param[out] notif_list List to append retrieved notifications to
+ * @return NIXL_SUCCESS if notifications retrieved, NIXL_IN_PROG if none available,
+ *         error code on failure
+ */
 nixl_status_t
 nixlLibfabricEngine::getNotifs(notif_list_t &notif_list) {
     // Progress data rails if progress thread is not enabled
@@ -1389,7 +1403,7 @@ nixlLibfabricEngine::getNotifs(notif_list_t &notif_list) {
 
     // Progress control rails only if progress thread is not handling them
     // Similar to data rails - avoid competing with progress thread
-    if (!progress_thread_enabled_ || !progress_thread_handles_control_rails_) {
+    if (!progress_thread_enabled_ || !progress_thread_handles_control_rails_.load()) {
         nixl_status_t progress_status = rail_manager.progressAllControlRails();
         if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
             NIXL_ERROR << "Failed to progress control rails in getNotifs.";
@@ -1420,11 +1434,23 @@ nixlLibfabricEngine::getNotifs(notif_list_t &notif_list) {
 }
 
 /****************************************
- * Progress Thread Function (Data Rails Only)
+ * Progress Thread Function
  *****************************************/
 
-// Progress thread that continuously processes completions on data rails
-// and optionally control rails based on provider type
+/**
+ * @brief Progress thread that continuously processes completions on data rails
+ *        and optionally control rails based on provider type.
+ *
+ * This function runs in a dedicated thread to process completion queue events.
+ * It detects the libfabric provider type and conditionally progresses control
+ * rails for providers that require manual progress (e.g., TCP provider).
+ *
+ * Provider-specific behavior:
+ * - TCP provider: Progresses both data and control rails (auto-progress unreliable)
+ * - Other providers: Progresses only data rails (control rails handled elsewhere)
+ *
+ * @return NIXL_SUCCESS on clean exit, error code otherwise
+ */
 nixl_status_t
 nixlLibfabricEngine::progressThread() {
     // Check if we need to progress control rails based on provider type
@@ -1445,7 +1471,7 @@ nixlLibfabricEngine::progressThread() {
     }
 
     // Store this decision so getNotifs knows not to compete
-    progress_thread_handles_control_rails_ = progress_control_rails;
+    progress_thread_handles_control_rails_.store(progress_control_rails);
 
     NIXL_DEBUG << "PT: Thread started successfully for data rails"
                << (progress_control_rails ? " and control rails" : " only");
