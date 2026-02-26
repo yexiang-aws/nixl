@@ -339,17 +339,17 @@ nixlLibfabricEngine::nixlLibfabricEngine(const nixlBackendInitParams *init_param
     // Initialize Rail Manager which will discover the topology and create all rails.
     try {
         NIXL_DEBUG << "Rail Manager created with " << rail_manager.getNumDataRails()
-                   << " data rails and " << rail_manager.getNumControlRails() << " control rails";
+                   << " data rails";
 
-        // Set up callbacks on each rail using Engine's static callback functions
-        size_t control_rail_id = 0;
-        NIXL_DEBUG << "Set notification processor for control rail 0";
-        rail_manager.getControlRail(control_rail_id)
+        // Set up notification callback on rail 0
+        size_t notification_rail_id = 0;
+        NIXL_DEBUG << "Set notification processor for data rail 0";
+        rail_manager.getDataRail(notification_rail_id)
             .setNotificationCallback([this](const std::string &serialized_notif) {
                 processNotification(serialized_notif);
             });
 
-        // Set up XFER_ID tracking callbacks for all data rails
+        // Set up XFER_ID tracking callbacks for all rails
         NIXL_DEBUG << "Setting up XFER_ID tracking callbacks for " << rail_manager.getNumDataRails()
                    << " data rails";
         for (size_t data_rail_id = 0; data_rail_id < rail_manager.getNumDataRails();
@@ -365,23 +365,14 @@ nixlLibfabricEngine::nixlLibfabricEngine(const nixlBackendInitParams *init_param
         // Create self-connection
         std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> data_endpoints(
             rail_manager.getNumDataRails());
-        std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> control_endpoints(
-            rail_manager.getNumControlRails());
-        // Prepare data rail endpoints
+        // Prepare rail endpoints
         for (size_t rail_id = 0; rail_id < rail_manager.getNumDataRails(); ++rail_id) {
             std::memcpy(data_endpoints[rail_id].data(),
                         rail_manager.getDataRail(rail_id).ep_name,
                         sizeof(rail_manager.getDataRail(rail_id).ep_name));
         }
-        // Prepare control rail endpoints
-        for (size_t rail_id = 0; rail_id < rail_manager.getNumControlRails(); ++rail_id) {
-            std::memcpy(control_endpoints[rail_id].data(),
-                        rail_manager.getControlRail(rail_id).ep_name,
-                        sizeof(rail_manager.getControlRail(rail_id).ep_name));
-        }
         // Create self-connection using common method
-        nixl_status_t conn_status =
-            createAgentConnection(localAgent, data_endpoints, control_endpoints);
+        nixl_status_t conn_status = createAgentConnection(localAgent, data_endpoints);
         if (conn_status != NIXL_SUCCESS) {
             throw std::runtime_error(
                 "createAgentConnection failed for self-connection with status: " +
@@ -389,10 +380,9 @@ nixlLibfabricEngine::nixlLibfabricEngine(const nixlBackendInitParams *init_param
         }
 
         NIXL_DEBUG << "Created self-connection for agent: " << localAgent << " on "
-                   << rail_manager.getNumDataRails() << " data rails and "
-                   << rail_manager.getNumControlRails() << " control rails";
+                   << rail_manager.getNumDataRails() << " data rails";
 
-        // Start Progress thread for data rail completion processing
+        // Start Progress thread for rail completion processing
         if (progress_thread_enabled_) {
             NIXL_DEBUG << "Starting Progress thread for data rails with delay: "
                        << progress_thread_delay_.count() << " microseconds";
@@ -423,10 +413,8 @@ nixlLibfabricEngine::~nixlLibfabricEngine() {
         progress_thread_stop_.store(true);
     }
 
-    nixl_status_t progress_status = rail_manager.progressAllControlRails();
-    if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
-        NIXL_ERROR << "Failed to progress control rails in ~nixlLibfabricEngine().";
-    }
+    // Progress rails to drain any pending operations
+    rail_manager.progressActiveDataRails();
 
     if (progress_thread_enabled_ && progress_thread_.joinable()) {
         NIXL_DEBUG << "Waiting for Progress thread to exit";
@@ -464,8 +452,7 @@ nixlLibfabricEngine::getConnInfo(std::string &str) const {
     }
 
     NIXL_DEBUG << "Rail Manager serialized connection info for " << rail_manager.getNumDataRails()
-               << " rails, " << rail_manager.getNumControlRails() << " control rails, "
-               << "total size=" << str.length();
+               << " data rails, total size=" << str.length();
 
     return NIXL_SUCCESS;
 }
@@ -484,8 +471,8 @@ nixlLibfabricEngine::loadRemoteConnInfo(const std::string &remote_agent,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    NIXL_DEBUG << "Processing " << rail_manager.getNumDataRails() << " data rails and "
-               << rail_manager.getNumControlRails() << " control rails for agent: " << remote_agent;
+    NIXL_DEBUG << "Processing " << rail_manager.getNumDataRails()
+               << " data rails for agent: " << remote_agent;
 
     // Use Rail Manager's connection SerDes method with "dest" prefix (remote is sending us their
     // endpoints as "dest")
@@ -498,8 +485,7 @@ nixlLibfabricEngine::loadRemoteConnInfo(const std::string &remote_agent,
         return status;
     }
     // Create connection to remote agent
-    nixl_status_t conn_status =
-        createAgentConnection(remote_agent, data_endpoints, control_endpoints);
+    nixl_status_t conn_status = createAgentConnection(remote_agent, data_endpoints);
     if (conn_status != NIXL_SUCCESS) {
         NIXL_ERROR << "createAgentConnection failed with status: " << conn_status;
         return conn_status;
@@ -577,20 +563,13 @@ nixlLibfabricEngine::disconnect(const std::string &remote_agent) {
 nixl_status_t
 nixlLibfabricEngine::createAgentConnection(
     const std::string &agent_name,
-    const std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &data_rail_endpoints,
-    const std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &control_rail_endpoints) {
+    const std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &data_rail_endpoints) {
 
     NIXL_DEBUG << "Creating connection for agent: " << agent_name;
 
     if (data_rail_endpoints.size() != rail_manager.getNumDataRails()) {
         NIXL_INFO << "Local " << rail_manager.getNumDataRails() << " data rail endpoints, remote "
                   << data_rail_endpoints.size();
-    }
-
-    if (control_rail_endpoints.size() != rail_manager.getNumControlRails()) {
-        NIXL_ERROR << "Expected " << rail_manager.getNumControlRails()
-                   << " control rail endpoints, got " << control_rail_endpoints.size();
-        return NIXL_ERR_INVALID_PARAM;
     }
 
     // Create connection object
@@ -602,7 +581,6 @@ nixlLibfabricEngine::createAgentConnection(
 
     conn->remoteAgent_ = agent_name;
     conn->rail_remote_addr_list_.reserve(rail_manager.getNumDataRails());
-    conn->control_rail_remote_addr_list_.reserve(rail_manager.getNumControlRails());
 
     // Process all data rails in one operation
     nixl_status_t data_status =
@@ -612,17 +590,6 @@ nixlLibfabricEngine::createAgentConnection(
                                         conn->src_ep_names_);
     if (data_status != NIXL_SUCCESS) {
         NIXL_ERROR << "insertAllAddresses failed for data rails with status: " << data_status;
-        return NIXL_ERR_BACKEND;
-    }
-
-    // Process all control rails in one operation
-    nixl_status_t control_status =
-        rail_manager.insertAllAddresses(nixlLibfabricRailManager::RailType::CONTROL,
-                                        control_rail_endpoints,
-                                        conn->control_rail_remote_addr_list_,
-                                        conn->control_ep_names_);
-    if (control_status != NIXL_SUCCESS) {
-        NIXL_ERROR << "insertAllAddresses failed for control rails with status: " << control_status;
         return NIXL_ERR_BACKEND;
     }
 
@@ -639,8 +606,7 @@ nixlLibfabricEngine::createAgentConnection(
     connections_[agent_name] = conn;
 
     NIXL_DEBUG << "Successfully created connection for agent: " << agent_name << " on "
-               << rail_manager.getNumDataRails() << " data rails and "
-               << rail_manager.getNumControlRails() << " control rails";
+               << rail_manager.getNumDataRails() << " data rails";
 
     return NIXL_SUCCESS;
 }
@@ -680,14 +646,10 @@ nixlLibfabricEngine::establishConnection(const std::string &remote_agent) const 
     }
 
     NIXL_DEBUG << "Using connection info with " << conn_info->src_ep_names_.size()
-               << " data rails and " << conn_info->control_ep_names_.size() << " control rails";
+               << " data rails";
     for (size_t i = 0; i < conn_info->src_ep_names_.size(); ++i) {
         NIXL_DEBUG << "Data rail " << i << ": "
                    << LibfabricUtils::hexdump(conn_info->src_ep_names_[i], LF_EP_NAME_MAX_LEN);
-    }
-    for (size_t i = 0; i < conn_info->control_ep_names_.size(); ++i) {
-        NIXL_DEBUG << "Control rail " << i << ": "
-                   << LibfabricUtils::hexdump(conn_info->control_ep_names_[i], LF_EP_NAME_MAX_LEN);
     }
     NIXL_DEBUG << "Agent index: " << it->second->agent_index_;
 
@@ -1173,6 +1135,16 @@ nixlLibfabricEngine::checkXfer(nixlBackendReqH *handle) const {
             NIXL_ERROR << "Failed to progress data rails in checkXfer";
             return progress_status;
         }
+        
+        // Also progress data rail 0 for notifications (SEND/RECV completions)
+        // This ensures recv buffers are reposted even when rail 0 has no active transfers
+        if (rail_manager.getNumDataRails() > 0) {
+            nixl_status_t notif_progress = rail_manager.getDataRail(0).progressCompletionQueue();
+            if (notif_progress != NIXL_SUCCESS && notif_progress != NIXL_IN_PROG) {
+                NIXL_DEBUG << "Failed to progress data rail 0 for notifications in checkXfer";
+                // Don't fail - just log and continue
+            }
+        }
     }
     // Then check for completions after processing any pending completions
     if (backend_handle->is_completed()) {
@@ -1310,7 +1282,6 @@ nixlLibfabricEngine::notifSendPriv(const std::string &remote_agent,
     }
 
     const auto &connection = it->second;
-    const size_t control_rail_id = 0; // Only use control rail 0 for notifications
 
     NIXL_DEBUG << "Sending " << binary_notifications.size() << " notification fragments"
                << " total_message_length=" << total_message_length;
@@ -1332,9 +1303,10 @@ nixlLibfabricEngine::notifSendPriv(const std::string &remote_agent,
                 total_message_length, expected_completions, metadata.agent_name_length);
         }
 
-        // Allocate control request for this notification fragment
+        // Allocate control request for this notification fragment from data rail 0
+        size_t data_rail_id = 0;
         size_t max_size = BinaryNotification::MAX_FRAGMENT_SIZE;
-        nixlLibfabricReq *control_request = rail_manager.getControlRail(control_rail_id)
+        nixlLibfabricReq *control_request = rail_manager.getDataRail(data_rail_id)
                                                 .allocateControlRequest(max_size, notif_xfer_id);
 
         if (!control_request) {
@@ -1351,23 +1323,24 @@ nixlLibfabricEngine::notifSendPriv(const std::string &remote_agent,
                    << " payload_chunk_size=" << header.payload_length << "B"
                    << " notif_xfer_id=" << header.notif_xfer_id;
 
+        // Use data rail 0's remote address since notifications now use data rails
         nixl_status_t status = rail_manager.postControlMessage(
             nixlLibfabricRailManager::ControlMessageType::NOTIFICATION,
             control_request,
-            connection->control_rail_remote_addr_list_[control_rail_id][0],
+            connection->rail_remote_addr_list_[data_rail_id][0],
             connection->agent_index_);
 
         if (status != NIXL_SUCCESS) {
-            NIXL_ERROR << "postControlMessage failed on control rail " << control_rail_id
+            NIXL_ERROR << "postControlMessage failed on data rail " << data_rail_id
                        << " for fragment " << seq_id;
             return NIXL_ERR_BACKEND;
         }
 
-        // Progress the control rail to ensure the message is sent.
-        status = rail_manager.progressAllControlRails();
+        // Progress data rail 0 to ensure the message is sent
+        status = rail_manager.getDataRail(data_rail_id).progressCompletionQueue();
         if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
-            NIXL_ERROR << "Failed to progress control rails in notifSendPriv.";
-            return status;
+            NIXL_DEBUG << "Failed to progress data rail 0 in notifSendPriv";
+            // Don't fail - just log and continue
         }
     }
 
@@ -1399,11 +1372,16 @@ nixlLibfabricEngine::getNotifs(notif_list_t &notif_list) {
         }
     }
 
-    nixl_status_t progress_status = rail_manager.progressAllControlRails();
-    if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
-        NIXL_ERROR << "Failed to progress control rails in getNotifs.";
-        return progress_status;
+    // Progress data rail 0 for notifications (SEND/RECV completions)
+    if (rail_manager.getNumDataRails() > 0) {
+        nixl_status_t progress_status = rail_manager.getDataRail(0).progressCompletionQueue();
+        if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
+            NIXL_DEBUG << "Failed to progress data rail 0 for notifications: " << progress_status;
+            // Don't fail - just log and continue
+        }
     }
+
+    // Notifications are now on data rail 0, progressed above
 
     // Then check for available notifications after processing completions
     // Thread-safe access to internal notification list
