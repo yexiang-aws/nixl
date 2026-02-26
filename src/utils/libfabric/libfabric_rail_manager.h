@@ -56,17 +56,6 @@ public:
     nixl_status_t
     createDataRails(const std::vector<std::string> &efa_devices, const std::string &provider_name);
 
-    /** Create control rails for connection management and notifications
-     * @param efa_devices List of EFA device names
-     * @param provider_name Provider name ("efa" or "efa-direct")
-     * @param num_control_rails Number of control rails to create
-     * @return NIXL_SUCCESS on success, error code on failure
-     */
-    nixl_status_t
-    createControlRails(const std::vector<std::string> &efa_devices,
-                       const std::string &provider_name,
-                       size_t num_control_rails);
-
     // Access rails
     /** Get reference to data rail by ID */
     nixlLibfabricRail &
@@ -80,28 +69,10 @@ public:
         return *data_rails_[rail_id];
     }
 
-    /** Get reference to control rail by ID */
-    nixlLibfabricRail &
-    getControlRail(size_t rail_id) {
-        return *control_rails_[rail_id];
-    }
-
-    /** Get const reference to control rail by ID */
-    const nixlLibfabricRail &
-    getControlRail(size_t rail_id) const {
-        return *control_rails_[rail_id];
-    }
-
     /** Get total number of data rails */
     size_t
     getNumDataRails() const {
         return data_rails_.size();
-    }
-
-    /** Get total number of control rails */
-    size_t
-    getNumControlRails() const {
-        return control_rails_.size();
     }
 
     // Memory registration management
@@ -221,11 +192,6 @@ public:
      */
     nixl_status_t
     progressActiveDataRails();
-    /** Process completions on all control rails for connection management and notifications
-     * @return NIXL_SUCCESS if completions processed, NIXL_IN_PROG if none, error on failure
-     */
-    nixl_status_t
-    progressAllControlRails();
     /** Validate that all rails are properly initialized
      * @return NIXL_SUCCESS if all rails initialized, error code otherwise
      */
@@ -316,10 +282,8 @@ private:
 
     // Rail allocation
     std::vector<std::unique_ptr<nixlLibfabricRail>> data_rails_;
-    std::vector<std::unique_ptr<nixlLibfabricRail>> control_rails_;
 
     size_t num_data_rails_;
-    size_t num_control_rails_;
 
     std::unique_ptr<nixlLibfabricTopology> topology;
 
