@@ -482,15 +482,19 @@ nixlLibfabricEngine::loadRemoteConnInfo(const std::string &remote_agent,
     // Use Rail Manager's connection SerDes method with "dest" prefix (remote is sending us their
     // endpoints as "dest")
     std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> data_endpoints;
-    std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> control_endpoints;
+    uint64_t remote_notif_addr = 0;
+    uint64_t remote_notif_key = 0;
+    
     nixl_status_t status = rail_manager.deserializeConnectionInfo(
-        "dest", remote_conn_info, data_endpoints, control_endpoints);
+        "dest", remote_conn_info, data_endpoints, remote_notif_addr, remote_notif_key);
     if (status != NIXL_SUCCESS) {
         NIXL_ERROR << "Rail Manager deserializeConnectionInfo failed";
         return status;
     }
+    
     // Create connection to remote agent
-    nixl_status_t conn_status = createAgentConnection(remote_agent, data_endpoints);
+    nixl_status_t conn_status = createAgentConnection(remote_agent, data_endpoints,
+                                                      remote_notif_addr, remote_notif_key);
     if (conn_status != NIXL_SUCCESS) {
         NIXL_ERROR << "createAgentConnection failed with status: " << conn_status;
         return conn_status;
@@ -647,7 +651,7 @@ nixlLibfabricEngine::establishConnection(const std::string &remote_agent) const 
         return NIXL_ERR_BACKEND;
     }
 
-    NIXL_DEBUG << "Establishing connections_ on control rails and data rails for agent: "
+    NIXL_DEBUG << "Establishing connections_ on data rails for agent: "
                << remote_agent;
 
     // Use single "Communicator" for CM

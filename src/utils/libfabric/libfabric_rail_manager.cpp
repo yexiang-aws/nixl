@@ -755,13 +755,14 @@ nixlLibfabricRailManager::serializeConnectionInfo(const std::string &user_prefix
 
     // Use user prefix with standard suffixes
     std::string data_prefix = user_prefix + "_data_ep_";
-    std::string control_prefix = user_prefix + "_control_ep_";
 
     serializeRailEndpoints(ser_des, data_prefix, RailType::DATA);
-    serializeRailEndpoints(ser_des, control_prefix, RailType::CONTROL);
+    // Control rails removed - no longer serialize control endpoints
+    
     str = ser_des.exportStr();
     NIXL_DEBUG << "Connection info serialized with prefix " << user_prefix
                << ", size=" << str.length();
+    
     return NIXL_SUCCESS;
 }
 
@@ -770,30 +771,23 @@ nixlLibfabricRailManager::deserializeConnectionInfo(
     const std::string &user_prefix,
     const std::string &serialized_data,
     std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &data_endpoints_out,
-    std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &control_endpoints_out) const {
+    uint64_t &remote_notif_addr_out,
+    uint64_t &remote_notif_key_out) const {
 
     nixlSerDes ser_des;
     ser_des.importStr(serialized_data);
 
     // Use user prefix with standard suffixes
     std::string data_prefix = user_prefix + "_data_ep_";
-    std::string control_prefix = user_prefix + "_control_ep_";
-    nixl_status_t data_status = deserializeRailEndpoints(ser_des, data_prefix, data_endpoints_out);
+    nixl_status_t data_status = deserializeRailEndpoints(ser_des, data_prefix, data_endpoints_out,
+                                                          remote_notif_addr_out, remote_notif_key_out);
     if (data_status != NIXL_SUCCESS) {
         NIXL_ERROR << "Failed to deserialize data rail endpoints with prefix: " << data_prefix;
         return data_status;
     }
-    nixl_status_t control_status =
-        deserializeRailEndpoints(ser_des, control_prefix, control_endpoints_out);
-    if (control_status != NIXL_SUCCESS) {
-        NIXL_ERROR << "Failed to deserialize control rail endpoints with prefix: "
-                   << control_prefix;
-        return control_status;
-    }
 
     NIXL_DEBUG << "Connection info deserialized with prefix " << user_prefix << ": "
-               << data_endpoints_out.size() << " data endpoints, " << control_endpoints_out.size()
-               << " control endpoints";
+               << data_endpoints_out.size() << " data endpoints";
     return NIXL_SUCCESS;
 }
 
@@ -812,22 +806,19 @@ nixlLibfabricRailManager::serializeRailEndpoints(nixlSerDes &ser_des,
         size_t ep_name_len = sizeof(rails[rail_id]->ep_name);
 
         ser_des.addBuf(rail_key.c_str(), ep_name, ep_name_len);
+    }
+    
+    // Add notification buffer info for rail 0 AFTER all endpoints
+    if (!rails.empty()) {
+        void *notif_buf_base = rails[0]->getNotificationBufferBase();
+        uint64_t notif_buf_key = rails[0]->getNotificationBufferKey();
         
-        // Add notification buffer info for rail 0 (notification rail)
-        if (rail_id == 0) {
-            void *notif_buf_base = rails[rail_id]->getNotificationBufferBase();
-            uint64_t notif_buf_key = rails[rail_id]->getNotificationBufferKey();
-            
-            std::string notif_addr_key = key_prefix + "notif_addr";
-            std::string notif_key_key = key_prefix + "notif_key";
-            
-            uint64_t notif_addr = reinterpret_cast<uint64_t>(notif_buf_base);
-            ser_des.addBuf(notif_addr_key.c_str(), &notif_addr, sizeof(notif_addr));
-            ser_des.addBuf(notif_key_key.c_str(), &notif_buf_key, sizeof(notif_buf_key));
-            
-            NIXL_DEBUG << "Serialized notification buffer: addr=" << notif_buf_base 
-                       << " key=" << notif_buf_key;
-        }
+        std::string notif_addr_key = key_prefix + "notif_addr";
+        std::string notif_key_key = key_prefix + "notif_key";
+        
+        uint64_t notif_addr = reinterpret_cast<uint64_t>(notif_buf_base);
+        ser_des.addBuf(notif_addr_key.c_str(), &notif_addr, sizeof(notif_addr));
+        ser_des.addBuf(notif_key_key.c_str(), &notif_buf_key, sizeof(notif_buf_key));
     }
 
     NIXL_DEBUG << "Serialized " << rails.size() << " data rail endpoints";
@@ -837,7 +828,9 @@ nixl_status_t
 nixlLibfabricRailManager::deserializeRailEndpoints(
     nixlSerDes &ser_des,
     const std::string &key_prefix,
-    std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &endpoints_out) const {
+    std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &endpoints_out,
+    uint64_t &remote_notif_addr_out,
+    uint64_t &remote_notif_key_out) const {
 
     std::string str;
     unsigned long num_rails_val;
@@ -886,7 +879,20 @@ nixlLibfabricRailManager::deserializeRailEndpoints(
         }
     }
 
-    NIXL_DEBUG << "Successfully deserialized " << num_rails << " rail endpoints.";
+    // Deserialize notification buffer info
+    std::string notif_addr_key = key_prefix + "notif_addr";
+    std::string notif_key_key = key_prefix + "notif_key";
+    
+    nixl_status_t addr_status = ser_des.getBuf(notif_addr_key, &remote_notif_addr_out, sizeof(remote_notif_addr_out));
+    nixl_status_t key_status = ser_des.getBuf(notif_key_key, &remote_notif_key_out, sizeof(remote_notif_key_out));
+    
+    if (addr_status != NIXL_SUCCESS || key_status != NIXL_SUCCESS) {
+        NIXL_ERROR << "Failed to deserialize notification buffer: addr_status=" << addr_status
+                   << " key_status=" << key_status;
+        return NIXL_ERR_BACKEND;
+    }
+
+    NIXL_DEBUG << "Successfully deserialized " << num_rails << " rail endpoints and notification buffer";
     return NIXL_SUCCESS;
 }
 

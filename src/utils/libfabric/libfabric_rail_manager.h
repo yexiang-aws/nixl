@@ -263,7 +263,8 @@ public:
         const std::string &user_prefix,
         const std::string &serialized_data,
         std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &data_endpoints_out,
-        std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &control_endpoints_out) const;
+        uint64_t &remote_notif_addr_out,
+        uint64_t &remote_notif_key_out) const;
 
     const nixlLibfabricTopology *
     getTopology() const {
@@ -316,7 +317,9 @@ private:
     deserializeRailEndpoints(
         nixlSerDes &ser_des,
         const std::string &key_prefix,
-        std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &endpoints_out) const;
+        std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &endpoints_out,
+        uint64_t &remote_notif_addr_out,
+        uint64_t &remote_notif_key_out) const;
 };
 
 #endif // NIXL_SRC_UTILS_LIBFABRIC_LIBFABRIC_RAIL_MANAGER_H
