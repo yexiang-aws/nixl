@@ -372,7 +372,12 @@ nixlLibfabricEngine::nixlLibfabricEngine(const nixlBackendInitParams *init_param
                         sizeof(rail_manager.getDataRail(rail_id).ep_name));
         }
         // Create self-connection using common method
-        nixl_status_t conn_status = createAgentConnection(localAgent, data_endpoints);
+        uint64_t local_notif_addr = reinterpret_cast<uint64_t>(
+            rail_manager.getDataRail(0).getNotificationBufferBase());
+        uint64_t local_notif_key = rail_manager.getDataRail(0).getNotificationBufferKey();
+        
+        nixl_status_t conn_status = createAgentConnection(localAgent, data_endpoints,
+                                                          local_notif_addr, local_notif_key);
         if (conn_status != NIXL_SUCCESS) {
             throw std::runtime_error(
                 "createAgentConnection failed for self-connection with status: " +
@@ -563,7 +568,9 @@ nixlLibfabricEngine::disconnect(const std::string &remote_agent) {
 nixl_status_t
 nixlLibfabricEngine::createAgentConnection(
     const std::string &agent_name,
-    const std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &data_rail_endpoints) {
+    const std::vector<std::array<char, LF_EP_NAME_MAX_LEN>> &data_rail_endpoints,
+    uint64_t remote_notif_addr,
+    uint64_t remote_notif_key) {
 
     NIXL_DEBUG << "Creating connection for agent: " << agent_name;
 
@@ -581,6 +588,11 @@ nixlLibfabricEngine::createAgentConnection(
 
     conn->remoteAgent_ = agent_name;
     conn->rail_remote_addr_list_.reserve(rail_manager.getNumDataRails());
+    conn->remote_notif_buffer_addr_ = remote_notif_addr;
+    conn->remote_notif_buffer_key_ = remote_notif_key;
+    
+    NIXL_DEBUG << "Stored remote notification buffer: addr=" << std::hex << remote_notif_addr 
+               << " key=" << remote_notif_key << std::dec;
 
     // Process all data rails in one operation
     nixl_status_t data_status =
@@ -1314,6 +1326,8 @@ nixlLibfabricEngine::notifSendPriv(const std::string &remote_agent,
             nixlLibfabricRailManager::ControlMessageType::NOTIFICATION,
             control_request,
             connection->rail_remote_addr_list_[data_rail_id][0],
+            connection->remote_notif_buffer_addr_,
+            connection->remote_notif_buffer_key_,
             connection->agent_index_);
 
         if (status != NIXL_SUCCESS) {

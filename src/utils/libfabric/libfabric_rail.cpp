@@ -158,7 +158,7 @@ RequestPool::allocateReq(uint32_t req_id) {
 ControlRequestPool::ControlRequestPool(size_t pool_size, size_t rail_id)
     : RequestPool(pool_size, rail_id),
       domain_(nullptr),
-      chunk_size_(NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE * pool_size) {}
+      chunk_size_(NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE * pool_size) {}
 
 ControlRequestPool::~ControlRequestPool() {
     // Cleanup should have been called explicitly before domain destruction
@@ -197,7 +197,7 @@ ControlRequestPool::createBufferChunk(size_t chunk_size, BufferChunk &chunk) {
 
     // Register buffer chunk with libfabric
     int ret =
-        fi_mr_reg(domain_, chunk.buffer, chunk_size, FI_SEND | FI_RECV, 0, 0, 0, &chunk.mr, NULL);
+        fi_mr_reg(domain_, chunk.buffer, chunk_size, FI_WRITE | FI_REMOTE_WRITE, 0, 0, 0, &chunk.mr, NULL);
     if (ret) {
         NIXL_ERROR << "CreateBufferChunk on Rail " << rail_id_
                    << " fi_mr_reg failed for buffer chunk: " << fi_strerror(-ret)
@@ -234,10 +234,10 @@ ControlRequestPool::initialize(struct fid_domain *domain) {
     // Pre-assign buffers to requests
     for (size_t i = 0; i < requests_.size(); ++i) {
         void *buffer_addr =
-            static_cast<char *>(initial_chunk.buffer) + (i * NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE);
+            static_cast<char *>(initial_chunk.buffer) + (i * NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE);
         requests_[i].buffer = buffer_addr;
         requests_[i].mr = initial_chunk.mr;
-        requests_[i].buffer_size = NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE;
+        requests_[i].buffer_size = NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE;
         requests_[i].operation_type = nixlLibfabricReq::SEND; // Default for control
     }
 
@@ -273,22 +273,22 @@ ControlRequestPool::expandPool() {
     for (size_t i = current_size; i < requests_.size(); ++i) {
         size_t local_idx = i - current_size;
         void *buffer_addr = static_cast<char *>(new_chunk.buffer) +
-            (local_idx * NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE);
+            (local_idx * NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE);
 
         // Validate buffer address is within chunk bounds
-        size_t buffer_offset = local_idx * NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE;
-        if (buffer_offset + NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE > new_chunk.size) {
+        size_t buffer_offset = local_idx * NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE;
+        if (buffer_offset + NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE > new_chunk.size) {
             NIXL_ERROR << " Rail " << rail_id_ << " buffer assignment out of bounds for request["
                        << i << "]:"
                        << " local_idx=" << local_idx << " buffer_offset=" << buffer_offset
-                       << " buffer_size=" << NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE
+                       << " buffer_size=" << NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE
                        << " chunk_size=" << new_chunk.size;
             return NIXL_ERR_BACKEND;
         }
 
         requests_[i].buffer = buffer_addr;
         requests_[i].mr = new_chunk.mr;
-        requests_[i].buffer_size = NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE;
+        requests_[i].buffer_size = NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE;
         requests_[i].operation_type = nixlLibfabricReq::SEND;
     }
 
@@ -301,10 +301,10 @@ ControlRequestPool::expandPool() {
 nixlLibfabricReq *
 ControlRequestPool::allocate(size_t needed_size, uint32_t req_id) {
     // Validate size before attempting allocation
-    if (needed_size > NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE) {
+    if (needed_size > NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE) {
         NIXL_ERROR << "Control pool allocation failed on rail " << rail_id_ << " - requested size "
                    << needed_size << " exceeds buffer size "
-                   << NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE;
+                   << NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE;
         return nullptr;
     }
 
@@ -313,7 +313,7 @@ ControlRequestPool::allocate(size_t needed_size, uint32_t req_id) {
 
     if (req) {
         // Always reset buffer_size to the actual message size needed
-        // The buffer itself is always NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE, but we need
+        // The buffer itself is always NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE, but we need
         // to set buffer_size to the actual message size for libfabric operations
         req->buffer_size = needed_size;
 
@@ -594,7 +594,7 @@ nixlLibfabricRail::nixlLibfabricRail(const std::string &device,
 
         for (size_t i = 0; i < NIXL_LIBFABRIC_RECV_POOL_SIZE; ++i) {
             nixlLibfabricReq *recv_req = allocateControlRequest(
-                NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE, LibfabricUtils::getNextXferId());
+                NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE, LibfabricUtils::getNextXferId());
             if (!recv_req) {
                 NIXL_ERROR << "Failed to allocate request for recv " << i << " on rail " << rail_id;
                 throw std::runtime_error("Failed to allocate request for recv pool on rail " +
@@ -928,7 +928,7 @@ nixlLibfabricRail::processRecvCompletion(struct fi_cq_data_entry *comp) const {
     releaseRequest(req);
 
     // Post a new receive using new resource management system
-    nixlLibfabricReq *new_req = allocateControlRequest(NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE,
+    nixlLibfabricReq *new_req = allocateControlRequest(NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE,
                                                        LibfabricUtils::getNextXferId());
     if (!new_req) {
         NIXL_ERROR << "Failed to allocate request for subsequent receive on rail " << rail_id;
@@ -966,6 +966,31 @@ nixlLibfabricRail::processRemoteWriteCompletion(struct fi_cq_data_entry *comp) c
             NIXL_ERROR << "No XFER_ID callback set for rail " << rail_id;
             return NIXL_ERR_BACKEND;
         }
+    } else if (msg_type == NIXL_LIBFABRIC_MSG_NOTIFICTION) {
+        NIXL_TRACE << "Remote notification write completion on rail " << rail_id 
+                   << " agent_idx=" << agent_idx << " XFER_ID=" << xfer_id;
+
+        // Calculate buffer slot from xfer_id
+        size_t slot_offset = (xfer_id % NIXL_LIBFABRIC_CONTROL_REQUESTS_PER_RAIL) * NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE;
+        void *notif_buffer_base = control_request_pool_.getNotificationBufferBase();
+        void *notif_data = static_cast<char*>(notif_buffer_base) + slot_offset;
+        
+        // Extract notification message from buffer
+        std::string message(static_cast<char*>(notif_data), comp->len);
+        
+        NIXL_TRACE << "Received notification via RDMA WRITE: " << message;
+        
+        // Call notification callback
+        if (notificationCallback) {
+            notificationCallback(message);
+            NIXL_TRACE << "Notification stored via callback";
+        } else {
+            NIXL_ERROR << "No notification callback set!";
+            return NIXL_ERR_BACKEND;
+        }
+        
+        // Clear the buffer slot
+        memset(notif_data, 0, NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE);
     }
     return NIXL_SUCCESS;
 }
@@ -1011,9 +1036,9 @@ nixl_status_t
 nixlLibfabricRail::postSend(uint64_t immediate_data,
                             fi_addr_t dest_addr,
                             nixlLibfabricReq *req) const {
-    if (req->buffer_size == 0 || req->buffer_size > NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE) {
+    if (req->buffer_size == 0 || req->buffer_size > NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE) {
         NIXL_ERROR << "Invalid message size=" << req->buffer_size
-                   << " (max: " << NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE << ")";
+                   << " (max: " << NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE << ")";
         return NIXL_ERR_INVALID_PARAM;
     }
 

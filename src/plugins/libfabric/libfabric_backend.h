@@ -121,6 +121,11 @@ private:
     size_t num_connected_rails_; // Number of successfully connected rails
     std::string initiator_addr_; // Local endpoint address
     std::string remote_addr_; // Remote endpoint address
+    
+    // Remote notification buffer info (for rail 0)
+    uint64_t remote_notif_buffer_addr_; // Remote notification buffer base address
+    uint64_t remote_notif_buffer_key_; // Remote notification buffer MR key
+    
 public:
     friend class nixlLibfabricEngine;
     friend class nixlLibfabricRail;
@@ -253,7 +258,9 @@ private:
     // Common connection creation helper
     nixl_status_t
     createAgentConnection(const std::string &agent_name,
-                          const std::vector<std::array<char, 56>> &data_rail_endpoints);
+                          const std::vector<std::array<char, 56>> &data_rail_endpoints,
+                          uint64_t remote_notif_addr = 0,
+                          uint64_t remote_notif_key = 0);
 
     // Private notification implementation with unified binary notification system
     nixl_status_t

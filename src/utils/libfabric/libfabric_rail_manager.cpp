@@ -443,6 +443,12 @@ nixlLibfabricRailManager::registerMemory(void *buffer,
         // Mark rail as active for progress tracking optimization
         markRailActive(rail_idx);
 
+        // Increment MR count for this rail
+        {
+            std::lock_guard<std::mutex> lock(rail_mr_count_mutex_);
+            rail_mr_count_[rail_idx]++;
+        }
+
         NIXL_DEBUG << "Registered memory on rail " << rail_idx
                    << " (mr=" << static_cast<const void *>(mr) << ", key=" << key << ")";
     }
@@ -474,7 +480,20 @@ nixlLibfabricRailManager::deregisterMemory(const std::vector<size_t> &selected_r
                 NIXL_ERROR << "Failed to deregister memory on rail " << rail_idx;
                 overall_status = status;
             }
-            markRailInactive(rail_idx);
+            
+            // Decrement MR count and only mark inactive when count reaches 0
+            {
+                std::lock_guard<std::mutex> lock(rail_mr_count_mutex_);
+                if (rail_mr_count_[rail_idx] > 0) {
+                    rail_mr_count_[rail_idx]--;
+                    if (rail_mr_count_[rail_idx] == 0) {
+                        markRailInactive(rail_idx);
+                        NIXL_DEBUG << "Rail " << rail_idx << " marked inactive (all MRs deregistered)";
+                    } else {
+                        NIXL_DEBUG << "Rail " << rail_idx << " still has " << rail_mr_count_[rail_idx] << " MRs";
+                    }
+                }
+            }
         }
     }
 
@@ -557,6 +576,8 @@ nixl_status_t
 nixlLibfabricRailManager::postControlMessage(ControlMessageType msg_type,
                                              nixlLibfabricReq *req,
                                              fi_addr_t dest_addr,
+                                             uint64_t remote_notif_addr,
+                                             uint64_t remote_notif_key,
                                              uint16_t agent_idx,
                                              std::function<void()> completion_callback) {
     // Validation - use rail 0 for notifications
@@ -594,11 +615,21 @@ nixlLibfabricRailManager::postControlMessage(ControlMessageType msg_type,
     NIXL_DEBUG << "Sending control message type " << msg_type_value << " agent_idx=" << agent_idx
                << " XFER_ID=" << xfer_id << " imm_data=" << imm_data << " on data rail " << data_rail_id;
 
-    // Use data rail 0 for notifications
-    nixl_status_t status = data_rails_[data_rail_id]->postSend(imm_data, dest_addr, req);
+    // Calculate remote notification buffer slot offset
+    // Use xfer_id to determine slot (simple modulo for now)
+    size_t slot_offset = (xfer_id % NIXL_LIBFABRIC_CONTROL_REQUESTS_PER_RAIL) * NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE;
+    uint64_t remote_addr = remote_notif_addr + slot_offset;
+    
+    // Get local buffer descriptor
+    void *local_desc = fi_mr_desc(req->mr);
+
+    // Use RDMA WRITE instead of SEND
+    nixl_status_t status = data_rails_[data_rail_id]->postWrite(
+        req->buffer, req->buffer_size, local_desc, imm_data, 
+        dest_addr, remote_addr, remote_notif_key, req);
 
     if (status != NIXL_SUCCESS) {
-        NIXL_ERROR << "Failed to send control message type " << static_cast<int>(msg_type)
+        NIXL_ERROR << "Failed to write control message type " << static_cast<int>(msg_type)
                    << " on data rail " << data_rail_id;
         // Release the pre-allocated control request back to pool on failure
         data_rails_[data_rail_id]->releaseRequest(req);
@@ -781,6 +812,22 @@ nixlLibfabricRailManager::serializeRailEndpoints(nixlSerDes &ser_des,
         size_t ep_name_len = sizeof(rails[rail_id]->ep_name);
 
         ser_des.addBuf(rail_key.c_str(), ep_name, ep_name_len);
+        
+        // Add notification buffer info for rail 0 (notification rail)
+        if (rail_id == 0) {
+            void *notif_buf_base = rails[rail_id]->getNotificationBufferBase();
+            uint64_t notif_buf_key = rails[rail_id]->getNotificationBufferKey();
+            
+            std::string notif_addr_key = key_prefix + "notif_addr";
+            std::string notif_key_key = key_prefix + "notif_key";
+            
+            uint64_t notif_addr = reinterpret_cast<uint64_t>(notif_buf_base);
+            ser_des.addBuf(notif_addr_key.c_str(), &notif_addr, sizeof(notif_addr));
+            ser_des.addBuf(notif_key_key.c_str(), &notif_buf_key, sizeof(notif_buf_key));
+            
+            NIXL_DEBUG << "Serialized notification buffer: addr=" << notif_buf_base 
+                       << " key=" << notif_buf_key;
+        }
     }
 
     NIXL_DEBUG << "Serialized " << rails.size() << " data rail endpoints";

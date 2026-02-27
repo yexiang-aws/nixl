@@ -184,6 +184,8 @@ public:
     postControlMessage(ControlMessageType msg_type,
                        nixlLibfabricReq *req,
                        fi_addr_t dest_addr,
+                       uint64_t remote_notif_addr,
+                       uint64_t remote_notif_key,
                        uint16_t agent_idx = 0,
                        std::function<void()> completion_callback = nullptr);
     // Progress APIs
@@ -293,6 +295,10 @@ private:
     // Active Rail Tracking System
     std::unordered_set<size_t> active_rails_;
     mutable std::mutex active_rails_mutex_;
+
+    // MR count per rail (for multi-MR support)
+    std::unordered_map<size_t, size_t> rail_mr_count_;
+    mutable std::mutex rail_mr_count_mutex_;
 
     // Internal rail selection method
     std::vector<size_t>

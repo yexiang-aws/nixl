@@ -172,6 +172,18 @@ public:
     void
     cleanup();
 
+    /** Get notification buffer base address for RDMA WRITE */
+    void *
+    getNotificationBufferBase() const {
+        return buffer_chunks_.empty() ? nullptr : buffer_chunks_[0].buffer;
+    }
+
+    /** Get notification buffer MR key for RDMA WRITE */
+    uint64_t
+    getNotificationBufferKey() const {
+        return buffer_chunks_.empty() ? 0 : fi_mr_key(buffer_chunks_[0].mr);
+    }
+
 private:
     /** Create new buffer chunk and register with libfabric */
     nixl_status_t
@@ -338,6 +350,19 @@ public:
     /** Set callback for XFER_ID tracking */
     void
     setXferIdCallback(std::function<void(uint32_t)> callback);
+
+    // Notification buffer access for RDMA WRITE
+    /** Get notification buffer base address */
+    void *
+    getNotificationBufferBase() const {
+        return control_request_pool_.getNotificationBufferBase();
+    }
+
+    /** Get notification buffer MR key */
+    uint64_t
+    getNotificationBufferKey() const {
+        return control_request_pool_.getNotificationBufferKey();
+    }
 
     // Optimized resource management methods
     /** Allocate control request with size validation */

@@ -43,9 +43,9 @@
 #define LF_EP_NAME_MAX_LEN 56
 
 // Request pool configuration constants
-#define NIXL_LIBFABRIC_CONTROL_REQUESTS_PER_RAIL 4096 // SEND/RECV operations (for notifications)
+#define NIXL_LIBFABRIC_CONTROL_REQUESTS_PER_RAIL 4096 // RDMA WRITE operations (for notifications)
 #define NIXL_LIBFABRIC_DATA_REQUESTS_PER_RAIL 1024 // WRITE/READ operations
-#define NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE 8192  // For SEND/RECV notifications
+#define NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE 8192  // For RDMA WRITE notifications
 #define NIXL_LIBFABRIC_RECV_POOL_SIZE 1024 // Number of recv requests to pre-post per rail
 
 // Retry configuration constants
@@ -141,7 +141,7 @@ private:
 
 public:
     /** @brief Maximum fragment size for control messages */
-    static constexpr size_t MAX_FRAGMENT_SIZE = NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE;
+    static constexpr size_t MAX_FRAGMENT_SIZE = NIXL_LIBFABRIC_NOTIFICATION_BUFFER_SIZE;
 
     /** @brief Constructor */
     BinaryNotification() {
