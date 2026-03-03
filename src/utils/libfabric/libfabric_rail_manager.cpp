@@ -528,8 +528,7 @@ nixlLibfabricRailManager::cleanupConnection(const std::vector<fi_addr_t> &fi_add
     auto &rails = rails_;
 
     if (fi_addrs_to_remove.size() != rails.size()) {
-        NIXL_ERROR << "Expected " << rails.size() << " data fi_addrs, got "
-                   << fi_addrs_to_remove.size();
+        NIXL_ERROR << "Expected " << rails.size() << " fi_addrs, got " << fi_addrs_to_remove.size();
         return NIXL_ERR_INVALID_PARAM;
     }
 
@@ -615,44 +614,44 @@ nixlLibfabricRailManager::postControlMessage(ControlMessageType msg_type,
 
 nixl_status_t
 nixlLibfabricRailManager::progressActiveRails() {
-    std::vector<size_t> rails_to_process;
+    std::unordered_set<size_t> rails_to_process;
 
     // Copy active rails under lock to avoid iterator invalidation
     {
         std::lock_guard<std::mutex> lock(active_rails_mutex_);
         // Always progress rail 0 for notifications (SEND/RECV)
-        bool rail0_in_active = active_rails_.count(0) > 0;
-        if (!rail0_in_active) {
-            rails_to_process.push_back(0);
-        }
-        for (size_t rail_id : active_rails_) {
-            rails_to_process.push_back(rail_id);
-        }
+        rails_to_process.insert(0);
+        rails_to_process.insert(active_rails_.begin(), active_rails_.end());
     }
 
     // Process rails without holding the lock
     bool any_completions = false;
-
+    nixl_status_t first_error = NIXL_SUCCESS;
     for (size_t rail_id : rails_to_process) {
         if (rail_id >= rails_.size()) {
-            NIXL_ERROR << "Invalid active rail ID: " << rail_id;
+            NIXL_ERROR << "Invalid rail ID: " << rail_id;
             continue;
         }
-        // Process completions on active rails
+        // Process completions on rails
         nixl_status_t status = rails_[rail_id]->progressCompletionQueue();
         if (status == NIXL_SUCCESS) {
             any_completions = true;
-            NIXL_DEBUG << "Processed completions on active rail " << rail_id;
+            NIXL_DEBUG << "Processed completions on rail " << rail_id;
         } else if (status != NIXL_IN_PROG && status != NIXL_SUCCESS) {
-            NIXL_ERROR << "Failed to process completions on active rail " << rail_id;
-            // Continue processing other active rails even if one fails
+            NIXL_ERROR << "Failed to process completions on rail " << rail_id;
+            // Continue processing other rails even if one fails
+            if (first_error == NIXL_SUCCESS) {
+                first_error = status;
+            }
         }
     }
 
     if (any_completions) {
         NIXL_TRACE << "Processed " << rails_to_process.size() << " rails, completions found";
     }
-
+    if (first_error != NIXL_SUCCESS) {
+        return first_error;
+    }
     return any_completions ? NIXL_SUCCESS : NIXL_IN_PROG;
 }
 
@@ -736,7 +735,6 @@ nixlLibfabricRailManager::serializeConnectionInfo(const std::string &user_prefix
     std::string data_prefix = user_prefix + "_data_ep_";
 
     serializeRailEndpoints(ser_des, data_prefix);
-    // Control rails removed - no longer serialize control endpoints
     str = ser_des.exportStr();
     NIXL_DEBUG << "Connection info serialized with prefix " << user_prefix
                << ", size=" << str.length();
@@ -759,7 +757,6 @@ nixlLibfabricRailManager::deserializeConnectionInfo(
         NIXL_ERROR << "Failed to deserialize rail endpoints with prefix: " << data_prefix;
         return data_status;
     }
-    // Control rails removed - no longer deserialize control endpoints
 
     NIXL_DEBUG << "Connection info deserialized with prefix " << user_prefix << ": "
                << data_endpoints_out.size() << " data endpoints";

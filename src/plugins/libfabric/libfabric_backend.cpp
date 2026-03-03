@@ -567,8 +567,8 @@ nixlLibfabricEngine::createAgentConnection(
     }
 
     if (data_rail_endpoints.size() != rail_manager.getNumRails()) {
-        NIXL_INFO << "Local " << rail_manager.getNumRails() << " rail endpoints, remote "
-                  << data_rail_endpoints.size();
+        NIXL_INFO << "Rail count (local: " << rail_manager.getNumRails()
+                  << ", remote: " << data_rail_endpoints.size() << ")";
     }
 
     // Create connection object
@@ -586,7 +586,7 @@ nixlLibfabricEngine::createAgentConnection(
         data_rail_endpoints, conn->rail_remote_addr_list_, conn->src_ep_names_);
     if (data_status != NIXL_SUCCESS) {
         NIXL_ERROR << "insertAllAddresses failed for rails with status: " << data_status;
-        return NIXL_ERR_BACKEND;
+        return data_status;
     }
 
     // Manage agent names and index
@@ -1095,8 +1095,9 @@ nixlLibfabricEngine::postXfer(const nixl_xfer_op_t &operation,
     // Progress rails to kick off transfers
     if (!progress_thread_enabled_) {
         nixl_status_t progress_status = rail_manager.progressActiveRails();
-        if (progress_status == NIXL_IN_PROG) {
-            return NIXL_IN_PROG;
+        if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
+            NIXL_ERROR << "Failed to progress rails in postXfer";
+            return progress_status;
         }
     }
 
@@ -1325,8 +1326,8 @@ nixlLibfabricEngine::notifSendPriv(const std::string &remote_agent,
         if (!progress_thread_enabled_) {
             status = rail_manager.getRail(rail_id).progressCompletionQueue();
             if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
-                NIXL_DEBUG << "Failed to progress rail 0 in notifSendPriv";
-                // Don't fail - just log and continue
+                NIXL_ERROR << "Failed to progress rail 0 in notifSendPriv";
+                return status;
             }
         }
     }
