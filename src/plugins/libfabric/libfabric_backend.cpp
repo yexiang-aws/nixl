@@ -561,6 +561,11 @@ nixlLibfabricEngine::createAgentConnection(
 
     NIXL_DEBUG << "Creating connection for agent: " << agent_name;
 
+    if (data_rail_endpoints.empty()) {
+        NIXL_ERROR << "Remote agent " << agent_name << " published zero rail endpoints";
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
     if (data_rail_endpoints.size() != rail_manager.getNumRails()) {
         NIXL_INFO << "Local " << rail_manager.getNumRails() << " rail endpoints, remote "
                   << data_rail_endpoints.size();
@@ -626,8 +631,7 @@ nixlLibfabricEngine::establishConnection(const std::string &remote_agent) const 
         return NIXL_ERR_BACKEND;
     }
 
-    NIXL_DEBUG << "Establishing connections_ on control rails and rails for agent: "
-               << remote_agent;
+    NIXL_DEBUG << "Establishing rail connections for agent: " << remote_agent;
 
     // Use single "Communicator" for CM
     auto *conn_info = it->second.get();

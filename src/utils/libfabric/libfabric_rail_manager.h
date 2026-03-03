@@ -250,7 +250,6 @@ public:
      * @param user_prefix Prefix used during serialization
      * @param serialized_data Serialized connection information
      * @param data_endpoints_out Rail endpoint addresses
-     * @param control_endpoints_out Control rail endpoint addresses
      * @return NIXL_SUCCESS on success, error code on failure
      */
     nixl_status_t

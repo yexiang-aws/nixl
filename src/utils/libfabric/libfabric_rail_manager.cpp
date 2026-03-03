@@ -86,11 +86,17 @@ nixl_status_t
 nixlLibfabricRailManager::createRails(const std::vector<std::string> &efa_devices,
                                       const std::string &provider_name) {
     num_rails_ = efa_devices.size();
+    if (num_rails_ == 0) {
+        NIXL_ERROR << "No network devices discovered; cannot create rails";
+        return NIXL_ERR_BACKEND;
+    }
     // Pre-allocate to ensure contiguous memory allocation
     rails_.reserve(num_rails_);
 
     // Build EFA device to rail index mapping for O(1) lookup
+    efa_device_to_rail_map.clear();
     efa_device_to_rail_map.reserve(num_rails_);
+    clearActiveRails();
 
     try {
         rails_.clear();
@@ -411,8 +417,8 @@ nixlLibfabricRailManager::registerMemory(void *buffer,
         if (rail_idx >= rails_.size()) {
             NIXL_ERROR << "Invalid rail index " << rail_idx;
             // Cleanup already registered MRs
-            for (size_t cleanup_idx : selected_rails) {
-                if (cleanup_idx >= rail_idx) break; // Only cleanup what we've done so far
+            for (size_t j = 0; j < i; ++j) {
+                const size_t cleanup_idx = selected_rails[j];
                 if (mr_list_out[cleanup_idx]) {
                     rails_[cleanup_idx]->deregisterMemory(mr_list_out[cleanup_idx]);
                     mr_list_out[cleanup_idx] = nullptr;
@@ -429,8 +435,8 @@ nixlLibfabricRailManager::registerMemory(void *buffer,
         if (status != NIXL_SUCCESS) {
             NIXL_ERROR << "Failed to register memory on rail " << rail_idx;
             // Cleanup already registered MRs
-            for (size_t cleanup_idx : selected_rails) {
-                if (cleanup_idx >= rail_idx) break; // Only cleanup what we've done so far
+            for (size_t j = 0; j < i; ++j) {
+                const size_t cleanup_idx = selected_rails[j];
                 if (mr_list_out[cleanup_idx]) {
                     rails_[cleanup_idx]->deregisterMemory(mr_list_out[cleanup_idx]);
                     mr_list_out[cleanup_idx] = nullptr;
