@@ -749,6 +749,15 @@ nixlLibfabricRail::progressCompletionQueue() const {
                 NIXL_ERROR << "CQ read failed on rail " << rail_id
                            << " with error: " << fi_strerror(err_entry.err)
                            << " prov_errno: " << err_entry.prov_errno << " len: " << err_entry.len;
+
+                // Clean up the failed request so the transfer handle doesn't hang
+                nixlLibfabricReq *req = findRequestFromContext(err_entry.op_context);
+                if (req && req->in_use) {
+                    if (req->completion_callback) {
+                        req->completion_callback();
+                    }
+                    releaseRequest(req);
+                }
             } else {
                 NIXL_ERROR << "fi_cq_readerr failed with " << err_ret;
             }
