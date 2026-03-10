@@ -458,7 +458,7 @@ nixlLibfabricRailManager::prepareAndSubmitTransfer(
             const size_t remote_ep_id =
                 remote_selected_endpoints[i % remote_selected_endpoints.size()];
             NIXL_DEBUG << "rail " << rail_id << ", remote_ep_id=" << remote_ep_id;
-            size_t current_chunk_size = chunk_size + (i == num_rails - 1 ? remainder : 0);
+            size_t current_chunk_size = chunk_size + (i < remainder ? 1 : 0);
             if (current_chunk_size == 0) break;
             // Allocate request
             nixlLibfabricReq *req = rails_[rail_id]->allocateDataRequest(op_type, xfer_id);
@@ -470,7 +470,8 @@ nixlLibfabricRailManager::prepareAndSubmitTransfer(
             req->completion_callback = completion_callback;
 
             // Calculate and populate chunk info
-            size_t chunk_offset = i * chunk_size;
+            // First 'remainder' rails get chunk_size+1, rest get chunk_size
+            size_t chunk_offset = i * chunk_size + std::min(i, remainder);
             req->chunk_offset = chunk_offset;
             req->chunk_size = current_chunk_size;
             req->local_addr = static_cast<char *>(local_addr) + chunk_offset;
