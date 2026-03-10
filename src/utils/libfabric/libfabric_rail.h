@@ -19,7 +19,6 @@
 #define NIXL_SRC_UTILS_LIBFABRIC_LIBFABRIC_RAIL_H
 
 #include <vector>
-#include <deque>
 #include <string>
 #include <functional>
 #include <mutex>
@@ -40,7 +39,7 @@ class nixlLibfabricConnection;
 struct nixlLibfabricReq {
     fi_context ctx; ///< Libfabric context for operation tracking
     size_t rail_id; ///< Rail ID that owns this request
-    size_t pool_index; ///< Index in the pool for deque compatibility
+    size_t pool_index; ///< Index in the pool for O(1) release
     uint32_t xfer_id; ///< Pre-assigned globally unique transfer ID
     void *buffer; ///< Pre-assigned buffer for CONTROL operations, nullptr for DATA
     struct fid_mr *mr; ///< Pre-assigned memory registration for CONTROL, nullptr for DATA
@@ -125,7 +124,7 @@ protected:
     void
     initializeBasePool(size_t pool_size);
 
-    mutable std::deque<nixlLibfabricReq> requests_; ///< Expandable request pool
+    mutable std::vector<nixlLibfabricReq> requests_; ///< Contiguous request pool (reserved upfront)
     mutable std::stack<size_t> free_indices_; ///< Stack of available request indices
     size_t rail_id_; ///< Rail ID for this pool
     size_t initial_pool_size_; ///< Original pool size for expansion calculations

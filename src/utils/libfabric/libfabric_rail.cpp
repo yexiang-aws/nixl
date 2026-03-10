@@ -38,7 +38,22 @@ RequestPool::RequestPool(size_t pool_size, size_t rail_id)
 void
 RequestPool::initializeBasePool(size_t pool_size) {
     size_t current_size = requests_.size();
-    requests_.resize(current_size + pool_size);
+    size_t new_size = current_size + pool_size;
+
+    // On first init, reserve capacity upfront to prevent reallocation
+    // (pointer stability is required since libfabric contexts reference elements)
+    if (current_size == 0) {
+        requests_.reserve(pool_size * NIXL_LIBFABRIC_REQUEST_POOL_MAX_MULTIPLIER);
+    }
+
+    if (new_size > requests_.capacity()) {
+        NIXL_ERROR << "InitializeBasePool - Rail " << rail_id_
+                   << " expansion would exceed reserved capacity ("
+                   << requests_.capacity() << "), refusing to reallocate";
+        return;
+    }
+
+    requests_.resize(new_size);
 
     for (size_t i = current_size; i < requests_.size(); ++i) {
         requests_[i].rail_id = rail_id_;
@@ -78,7 +93,7 @@ RequestPool::release(nixlLibfabricReq *req) const {
     req->completion_callback = nullptr;
     memset(&req->ctx, 0, sizeof(fi_context));
 
-    // Use pool_index instead of pointer arithmetic for deque compatibility
+    // Use pool_index for O(1) release
     size_t idx = req->pool_index;
 
     // Validate the index is within bounds

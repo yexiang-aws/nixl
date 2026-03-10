@@ -47,6 +47,7 @@
 #define NIXL_LIBFABRIC_DATA_REQUESTS_PER_RAIL 1024 // WRITE/READ operations
 #define NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE 8192 // For SEND/RECV notifications
 #define NIXL_LIBFABRIC_RECV_POOL_SIZE 1024 // Number of recv requests to pre-post per rail
+#define NIXL_LIBFABRIC_REQUEST_POOL_MAX_MULTIPLIER 8 // Reserve capacity for up to 8x expansions
 
 // Retry configuration constants
 #define NIXL_LIBFABRIC_LOG_INTERVAL_ATTEMPTS 100 // Log every N attempts to avoid spam
