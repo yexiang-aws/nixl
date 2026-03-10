@@ -987,7 +987,6 @@ nixlLibfabricRailManager::postControlMessage(ControlMessageType msg_type,
     size_t rail_id = 0; // Use rail 0 for notifications
     uint32_t xfer_id = req->xfer_id;
     // For control messages, use SEQ_ID 0 since they don't need sequence tracking
-    // TODO: Add sequencing for connection establishment workflow.
     uint64_t imm_data = NIXL_MAKE_IMM_DATA(msg_type_value, agent_idx, xfer_id, 0);
 
     // Set completion callback if provided

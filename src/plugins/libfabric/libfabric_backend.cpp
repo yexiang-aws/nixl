@@ -631,28 +631,53 @@ nixlLibfabricEngine::establishConnection(const std::string &remote_agent) const 
         return NIXL_ERR_NOT_FOUND;
     }
 
-    // Verify we have addresses for all rails
-    if (it->second->rail_remote_addr_list_.size() != rail_manager.getNumRails()) {
-        NIXL_ERROR << "Remote connection has " << it->second->rail_remote_addr_list_.size()
-                   << " rails, expected " << rail_manager.getNumRails();
-        return NIXL_ERR_BACKEND;
-    }
-
-    NIXL_DEBUG << "Establishing rail connections for agent: " << remote_agent;
-
-    // Use single "Communicator" for CM
     auto *conn_info = it->second.get();
     if (!conn_info) {
         NIXL_ERROR << "Connection info for agent " << remote_agent << " is null";
         return NIXL_ERR_BACKEND;
     }
 
-    NIXL_DEBUG << "Using connection info with " << conn_info->src_ep_names_.size() << " rails";
-    for (size_t i = 0; i < conn_info->src_ep_names_.size(); ++i) {
-        NIXL_DEBUG << "Rail " << i << ": "
-                   << LibfabricUtils::hexdump(conn_info->src_ep_names_[i], LF_EP_NAME_MAX_LEN);
+    // Transition to CONNECTING state
+    conn_info->overall_state_ = ConnectionState::CONNECTING;
+    conn_info->num_connected_rails_ = 0;
+
+    // Validate rail count matches
+    size_t num_rails = rail_manager.getNumRails();
+    if (conn_info->rail_remote_addr_list_.size() != num_rails) {
+        NIXL_ERROR << "Remote connection has " << conn_info->rail_remote_addr_list_.size()
+                   << " rails, expected " << num_rails;
+        conn_info->overall_state_ = ConnectionState::DISCONNECTED;
+        return NIXL_ERR_BACKEND;
     }
-    NIXL_DEBUG << "Agent index: " << it->second->agent_index_;
+
+    // Validate all rails are properly initialized
+    nixl_status_t rail_status = rail_manager.validateAllRailsInitialized();
+    if (rail_status != NIXL_SUCCESS) {
+        NIXL_ERROR << "Rail validation failed for " << remote_agent;
+        conn_info->overall_state_ = ConnectionState::DISCONNECTED;
+        return rail_status;
+    }
+
+    // Validate each rail has valid fi_addr entries
+    for (const auto &[rail_id, addrs] : conn_info->rail_remote_addr_list_) {
+        if (rail_id >= num_rails) {
+            NIXL_ERROR << "Invalid rail_id " << rail_id << " for " << remote_agent;
+            conn_info->overall_state_ = ConnectionState::DISCONNECTED;
+            return NIXL_ERR_BACKEND;
+        }
+        for (size_t j = 0; j < addrs.size(); ++j) {
+            if (addrs[j] == FI_ADDR_UNSPEC) {
+                NIXL_ERROR << "FI_ADDR_UNSPEC on rail " << rail_id << " addr " << j
+                           << " for " << remote_agent;
+                conn_info->overall_state_ = ConnectionState::DISCONNECTED;
+                return NIXL_ERR_BACKEND;
+            }
+        }
+        conn_info->num_connected_rails_++;
+    }
+
+    NIXL_DEBUG << "Validated " << conn_info->num_connected_rails_ << "/" << num_rails
+               << " rails for " << remote_agent;
 
     conn_info->overall_state_ = ConnectionState::CONNECTED;
     NIXL_DEBUG << "Connection state for agent " << remote_agent << " is now "

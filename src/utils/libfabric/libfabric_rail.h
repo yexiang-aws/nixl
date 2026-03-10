@@ -215,6 +215,7 @@ public:
 /** Connection state tracking for multi-rail connections */
 enum class ConnectionState {
     DISCONNECTED, ///< No connection attempt made, initial state
+    CONNECTING, ///< Connection establishment in progress, validating rails
     CONNECTED ///< Ready for data transfers.
 };
 
@@ -224,6 +225,8 @@ operator<<(std::ostream &os, const ConnectionState &state) {
     switch (state) {
     case ConnectionState::DISCONNECTED:
         return os << "DISCONNECTED";
+    case ConnectionState::CONNECTING:
+        return os << "CONNECTING";
     case ConnectionState::CONNECTED:
         return os << "CONNECTED";
     default:
