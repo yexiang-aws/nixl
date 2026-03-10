@@ -235,6 +235,19 @@ nixlLibfabricRailManager::nixlLibfabricRailManager(size_t striping_threshold)
 
 nixlLibfabricRailManager::~nixlLibfabricRailManager() {
     NIXL_DEBUG << "Destroying rail manager";
+
+    // Flush MR cache - deregister all cached entries
+    std::lock_guard<std::mutex> lock(mr_cache_mutex_);
+    for (auto &pair : mr_cache_) {
+        MrCacheEntry &entry = pair.second;
+        for (size_t rail_idx : entry.selected_rails) {
+            if (rail_idx < rails_.size() && entry.mr_list[rail_idx]) {
+                rails_[rail_idx]->deregisterMemory(entry.mr_list[rail_idx]);
+            }
+        }
+    }
+    mr_cache_.clear();
+    mr_cache_lru_.clear();
 }
 
 nixl_status_t
@@ -669,6 +682,32 @@ nixlLibfabricRailManager::selectRailsForMemory(void *mem_addr,
 }
 
 nixl_status_t
+nixlLibfabricRailManager::evictMrCacheEntry() {
+    // Caller must hold mr_cache_mutex_
+    // Walk LRU list from oldest to find an unreferenced entry
+    for (auto it = mr_cache_lru_.begin(); it != mr_cache_lru_.end(); ++it) {
+        auto cache_it = mr_cache_.find(*it);
+        if (cache_it != mr_cache_.end() && cache_it->second.refcount == 0) {
+            MrCacheEntry &entry = cache_it->second;
+            NIXL_DEBUG << "Evicting MR cache entry: addr=" << (void *)it->addr
+                       << " length=" << it->length;
+            // Deregister MRs on each rail
+            for (size_t rail_idx : entry.selected_rails) {
+                if (rail_idx < rails_.size() && entry.mr_list[rail_idx]) {
+                    rails_[rail_idx]->deregisterMemory(entry.mr_list[rail_idx]);
+                    markRailInactive(rail_idx);
+                }
+            }
+            mr_cache_.erase(cache_it);
+            mr_cache_lru_.erase(it);
+            return NIXL_SUCCESS;
+        }
+    }
+    NIXL_WARN << "MR cache full with no evictable entries";
+    return NIXL_ERR_BACKEND;
+}
+
+nixl_status_t
 nixlLibfabricRailManager::registerMemory(void *buffer,
                                          size_t length,
                                          nixl_mem_t mem_type,
@@ -682,9 +721,30 @@ nixlLibfabricRailManager::registerMemory(void *buffer,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    // Select rails based on memory type and PCI bus ID
-    // For VRAM: uses PCI bus ID provided by backend to map to topology-aware rails
-    // For DRAM: uses all available rails
+    MrCacheKey cache_key{reinterpret_cast<uintptr_t>(buffer), length, mem_type, device_id};
+
+    // Check MR cache under lock
+    {
+        std::lock_guard<std::mutex> lock(mr_cache_mutex_);
+        auto it = mr_cache_.find(cache_key);
+        if (it != mr_cache_.end()) {
+            MrCacheEntry &entry = it->second;
+            entry.refcount++;
+            // Move to back of LRU (most recently used)
+            mr_cache_lru_.erase(entry.lru_it);
+            mr_cache_lru_.push_back(cache_key);
+            entry.lru_it = std::prev(mr_cache_lru_.end());
+
+            mr_list_out = entry.mr_list;
+            key_list_out = entry.key_list;
+            selected_rails_out = entry.selected_rails;
+            NIXL_DEBUG << "MR cache hit: addr=" << buffer << " length=" << length
+                       << " refcount=" << entry.refcount;
+            return NIXL_SUCCESS;
+        }
+    }
+
+    // Cache miss - perform actual registration
     std::vector<size_t> selected_rails =
         selectRailsForMemory(buffer, mem_type, device_id, device_pci_bus_id);
     if (selected_rails.empty()) {
@@ -697,18 +757,15 @@ nixlLibfabricRailManager::registerMemory(void *buffer,
         iface = topology->getMrAttrIface(device_id);
     }
 
-    // Resize output vectors to match all rails
     mr_list_out.resize(rails_.size(), nullptr);
     key_list_out.clear();
     key_list_out.resize(rails_.size(), FI_KEY_NOTAVAIL);
-    selected_rails_out = selected_rails; // Return which rails were selected
+    selected_rails_out = selected_rails;
 
-    // Register memory on each selected rail
     for (size_t i = 0; i < selected_rails.size(); ++i) {
         size_t rail_idx = selected_rails[i];
         if (rail_idx >= rails_.size()) {
             NIXL_ERROR << "Invalid rail index " << rail_idx;
-            // Cleanup already registered MRs
             for (size_t j = 0; j < i; ++j) {
                 const size_t cleanup_idx = selected_rails[j];
                 if (mr_list_out[cleanup_idx]) {
@@ -721,12 +778,10 @@ nixlLibfabricRailManager::registerMemory(void *buffer,
 
         struct fid_mr *mr;
         uint64_t key;
-        // Pass device_id parameter to individual rail's registerMemory calls
         nixl_status_t status =
             rails_[rail_idx]->registerMemory(buffer, length, mem_type, device_id, iface, &mr, &key);
         if (status != NIXL_SUCCESS) {
             NIXL_ERROR << "Failed to register memory on rail " << rail_idx;
-            // Cleanup already registered MRs
             for (size_t j = 0; j < i; ++j) {
                 const size_t cleanup_idx = selected_rails[j];
                 if (mr_list_out[cleanup_idx]) {
@@ -739,27 +794,84 @@ nixlLibfabricRailManager::registerMemory(void *buffer,
 
         mr_list_out[rail_idx] = mr;
         key_list_out[rail_idx] = key;
-
-        // Mark rail as active for progress tracking optimization
         markRailActive(rail_idx);
 
         NIXL_DEBUG << "Registered memory on rail " << rail_idx
                    << " (mr=" << static_cast<const void *>(mr) << ", key=" << key << ")";
     }
 
+    // Insert into MR cache
+    {
+        std::lock_guard<std::mutex> lock(mr_cache_mutex_);
+        // Another thread may have inserted while we were registering
+        auto race_it = mr_cache_.find(cache_key);
+        if (race_it != mr_cache_.end()) {
+            // Use the existing entry; deregister what we just registered
+            MrCacheEntry &existing = race_it->second;
+            existing.refcount++;
+            mr_cache_lru_.erase(existing.lru_it);
+            mr_cache_lru_.push_back(cache_key);
+            existing.lru_it = std::prev(mr_cache_lru_.end());
+            // Deregister our duplicate MRs
+            for (size_t rail_idx : selected_rails) {
+                if (rail_idx < rails_.size() && mr_list_out[rail_idx]) {
+                    rails_[rail_idx]->deregisterMemory(mr_list_out[rail_idx]);
+                }
+            }
+            mr_list_out = existing.mr_list;
+            key_list_out = existing.key_list;
+            selected_rails_out = existing.selected_rails;
+            NIXL_DEBUG << "MR cache race hit: addr=" << buffer << " length=" << length;
+            return NIXL_SUCCESS;
+        }
+        // Evict if cache is full
+        if (mr_cache_.size() >= NIXL_LIBFABRIC_MR_CACHE_MAX_SIZE) {
+            evictMrCacheEntry();
+        }
+        mr_cache_lru_.push_back(cache_key);
+        MrCacheEntry entry;
+        entry.mr_list = mr_list_out;
+        entry.key_list = key_list_out;
+        entry.selected_rails = selected_rails_out;
+        entry.refcount = 1;
+        entry.lru_it = std::prev(mr_cache_lru_.end());
+        mr_cache_.emplace(cache_key, std::move(entry));
+        NIXL_DEBUG << "MR cache insert: addr=" << buffer << " length=" << length;
+    }
+
     return NIXL_SUCCESS;
 }
 
 nixl_status_t
-nixlLibfabricRailManager::deregisterMemory(const std::vector<size_t> &selected_rails,
+nixlLibfabricRailManager::deregisterMemory(void *buffer,
+                                           size_t length,
+                                           nixl_mem_t mem_type,
+                                           int device_id,
+                                           const std::vector<size_t> &selected_rails,
                                            const std::vector<struct fid_mr *> &mr_list) {
     if (selected_rails.empty() || mr_list.size() != rails_.size()) {
         NIXL_ERROR << "Invalid parameters";
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    nixl_status_t overall_status = NIXL_SUCCESS;
+    MrCacheKey cache_key{reinterpret_cast<uintptr_t>(buffer), length, mem_type, device_id};
 
+    std::lock_guard<std::mutex> lock(mr_cache_mutex_);
+    auto it = mr_cache_.find(cache_key);
+    if (it != mr_cache_.end()) {
+        MrCacheEntry &entry = it->second;
+        if (entry.refcount > 0) {
+            entry.refcount--;
+        }
+        NIXL_DEBUG << "MR cache deref: addr=" << buffer << " length=" << length
+                   << " refcount=" << entry.refcount;
+        // Keep in cache for reuse; eviction handles actual deregistration
+        return NIXL_SUCCESS;
+    }
+
+    // Not in cache - direct deregistration (shouldn't normally happen)
+    NIXL_WARN << "MR cache miss on deregister: addr=" << buffer << " length=" << length;
+    nixl_status_t overall_status = NIXL_SUCCESS;
     for (size_t i = 0; i < selected_rails.size(); ++i) {
         size_t rail_idx = selected_rails[i];
         if (rail_idx >= rails_.size()) {
@@ -767,7 +879,6 @@ nixlLibfabricRailManager::deregisterMemory(const std::vector<size_t> &selected_r
             overall_status = NIXL_ERR_INVALID_PARAM;
             continue;
         }
-
         if (mr_list[rail_idx]) {
             nixl_status_t status = rails_[rail_idx]->deregisterMemory(mr_list[rail_idx]);
             if (status != NIXL_SUCCESS) {
@@ -777,7 +888,6 @@ nixlLibfabricRailManager::deregisterMemory(const std::vector<size_t> &selected_r
             markRailInactive(rail_idx);
         }
     }
-
     return overall_status;
 }
 

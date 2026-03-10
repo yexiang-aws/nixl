@@ -23,6 +23,7 @@
 #include <memory>
 #include <thread>
 #include <mutex>
+#include <shared_mutex>
 #include <condition_variable>
 #include <atomic>
 #include <chrono>
@@ -77,6 +78,7 @@ class nixlLibfabricPrivateMetadata : public nixlBackendMD {
 private:
     void *buffer_; // Local memory buffer address
     size_t length_; // Buffer length in bytes
+    nixl_mem_t mem_type_; // Memory type (DRAM_SEG or VRAM_SEG)
     int device_id_; // Device ID for VRAM, -1 for DRAM
     std::vector<struct fid_mr *> rail_mr_list_; // Memory registrations, one per rail
     std::vector<uint64_t> rail_key_list_; // Remote access keys, one per rail
@@ -84,7 +86,7 @@ private:
     std::vector<size_t> selected_rails_; // Rails selected based on memory topology
 
 public:
-    nixlLibfabricPrivateMetadata() : nixlBackendMD(true), device_id_(-1) {}
+    nixlLibfabricPrivateMetadata() : nixlBackendMD(true), mem_type_(DRAM_SEG), device_id_(-1) {}
     friend class nixlLibfabricEngine;
 };
 
@@ -203,7 +205,7 @@ private:
     std::atomic<bool> progress_thread_stop_;
 
     // Mutex for connection state tracking
-    mutable std::mutex connection_state_mutex_;
+    mutable std::shared_mutex connection_state_mutex_;
 
 
     // System runtime type (set during initialization from rail_manager)

@@ -25,6 +25,7 @@
 #include <functional>
 #include <mutex>
 #include <atomic>
+#include <list>
 #include "libfabric_rail.h"
 
 #ifdef HAVE_CUDA
@@ -64,6 +65,41 @@ public:
 
 protected:
     nixlLibfabricRailSelectionPolicy() {}
+};
+
+/** MR cache key: uniquely identifies a memory registration */
+struct MrCacheKey {
+    uintptr_t addr;
+    size_t length;
+    nixl_mem_t mem_type;
+    int device_id;
+
+    bool
+    operator==(const MrCacheKey &other) const {
+        return addr == other.addr && length == other.length && mem_type == other.mem_type &&
+            device_id == other.device_id;
+    }
+};
+
+/** Hash function for MrCacheKey */
+struct MrCacheKeyHash {
+    size_t
+    operator()(const MrCacheKey &k) const {
+        size_t h = std::hash<uintptr_t>()(k.addr);
+        h ^= std::hash<size_t>()(k.length) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int>()(k.mem_type) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int>()(k.device_id) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+/** MR cache entry with refcounting and LRU tracking */
+struct MrCacheEntry {
+    std::vector<struct fid_mr *> mr_list;
+    std::vector<uint64_t> key_list;
+    std::vector<size_t> selected_rails;
+    size_t refcount;
+    std::list<MrCacheKey>::iterator lru_it;
 };
 
 /** Central manager for multi-rail RDMA operations with topology awareness */
@@ -155,12 +191,20 @@ public:
                    std::vector<uint64_t> &key_list_out,
                    std::vector<size_t> &selected_rails_out);
     /** Deregister memory from specified rails
+     * @param buffer Memory buffer address (used for MR cache lookup)
+     * @param length Buffer size in bytes
+     * @param mem_type Memory type (DRAM_SEG or VRAM_SEG)
+     * @param device_id Device ID
      * @param selected_rails List of rail IDs to deregister from
      * @param mr_list Memory registration handles to deregister
      * @return NIXL_SUCCESS on success, error code on failure
      */
     nixl_status_t
-    deregisterMemory(const std::vector<size_t> &selected_rails,
+    deregisterMemory(void *buffer,
+                     size_t length,
+                     nixl_mem_t mem_type,
+                     int device_id,
+                     const std::vector<size_t> &selected_rails,
                      const std::vector<struct fid_mr *> &mr_list);
 
     // Connection Management APIs
@@ -354,6 +398,15 @@ private:
     // Active Rail Tracking System
     std::unordered_set<size_t> active_rails_;
     mutable std::mutex active_rails_mutex_;
+
+    // MR cache with LRU eviction and refcounting
+    std::unordered_map<MrCacheKey, MrCacheEntry, MrCacheKeyHash> mr_cache_;
+    std::list<MrCacheKey> mr_cache_lru_;
+    mutable std::mutex mr_cache_mutex_;
+
+    /** Evict oldest unreferenced MR cache entry */
+    nixl_status_t
+    evictMrCacheEntry();
 
     // rail selection policy for DRAM memory type
     std::unique_ptr<nixlLibfabricRailSelectionPolicy> dram_rail_selection_policy_;
