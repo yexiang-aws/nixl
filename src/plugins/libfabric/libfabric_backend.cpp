@@ -1141,20 +1141,7 @@ nixlLibfabricEngine::postXfer(const nixl_xfer_op_t &operation,
         backend_handle->adjust_total_submitted_requests(total_submitted);
     }
 
-    // Send notification immediately after successful request submission
-    if (backend_handle->has_notif && backend_handle->operation_ == nixl_xfer_op_t::NIXL_WRITE) {
-        nixl_status_t notif_status = notifSendPriv(remote_agent,
-                                                   backend_handle->binary_notifs,
-                                                   backend_handle->total_notif_msg_len,
-                                                   backend_handle->post_xfer_id,
-                                                   backend_handle->get_submitted_requests_count());
-        if (notif_status != NIXL_SUCCESS) {
-            NIXL_ERROR << "Failed to send notification";
-            return notif_status;
-        }
-        NIXL_DEBUG << "Notification sent immediately with XFER_ID=" << backend_handle->post_xfer_id
-                   << ", expected_completions: " << backend_handle->get_submitted_requests_count();
-    }
+    // WRITE notifications are deferred until CQ completion (checkXfer or early completion below)
 
     // Progress rails to kick off transfers
     if (!progress_thread_enabled_) {
@@ -1167,12 +1154,15 @@ nixlLibfabricEngine::postXfer(const nixl_xfer_op_t &operation,
 
     // For very small transfers we can check for local completions immediately.
     if (backend_handle->is_completed()) {
-        if (backend_handle->has_notif && backend_handle->operation_ == nixl_xfer_op_t::NIXL_READ) {
+        if (backend_handle->has_notif) {
+            uint32_t expected = (backend_handle->operation_ == nixl_xfer_op_t::NIXL_WRITE)
+                                    ? backend_handle->get_submitted_requests_count()
+                                    : 0;
             nixl_status_t notif_status = notifSendPriv(remote_agent,
                                                        backend_handle->binary_notifs,
                                                        backend_handle->total_notif_msg_len,
                                                        backend_handle->post_xfer_id,
-                                                       0);
+                                                       expected);
             if (notif_status != NIXL_SUCCESS) {
                 NIXL_ERROR << "Failed to send notification";
                 return notif_status;
@@ -1199,12 +1189,15 @@ nixlLibfabricEngine::checkXfer(nixlBackendReqH *handle) const {
     // Then check for completions after processing any pending completions
     if (backend_handle->is_completed()) {
         NIXL_DEBUG << "Data transfer completed successfully";
-        if (backend_handle->has_notif && backend_handle->operation_ == nixl_xfer_op_t::NIXL_READ) {
+        if (backend_handle->has_notif) {
+            uint32_t expected = (backend_handle->operation_ == nixl_xfer_op_t::NIXL_WRITE)
+                                    ? backend_handle->get_submitted_requests_count()
+                                    : 0;
             nixl_status_t notif_status = notifSendPriv(backend_handle->remote_agent_,
                                                        backend_handle->binary_notifs,
                                                        backend_handle->total_notif_msg_len,
                                                        backend_handle->post_xfer_id,
-                                                       0);
+                                                       expected);
             if (notif_status != NIXL_SUCCESS) {
                 NIXL_ERROR << "Failed to send notification";
                 return notif_status;
