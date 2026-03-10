@@ -382,6 +382,11 @@ private:
     // Provider capability flags
     bool provider_supports_hmem_;
 
+    /** Bounded retry with exponential backoff for FI_EAGAIN */
+    template<typename FabricOp>
+    nixl_status_t
+    retryFabricOp(FabricOp &&op, const char *op_name) const;
+
 
     nixl_status_t
     processCompletionQueueEntry(struct fi_cq_data_entry *comp) const;

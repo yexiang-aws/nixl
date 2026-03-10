@@ -50,6 +50,9 @@
 
 // Retry configuration constants
 #define NIXL_LIBFABRIC_LOG_INTERVAL_ATTEMPTS 100 // Log every N attempts to avoid spam
+#define NIXL_LIBFABRIC_EAGAIN_MAX_RETRIES 10000 // Max retries before failing
+#define NIXL_LIBFABRIC_EAGAIN_INITIAL_BACKOFF_US 1 // Initial backoff in microseconds
+#define NIXL_LIBFABRIC_EAGAIN_MAX_BACKOFF_US 1000 // Max backoff cap in microseconds
 
 // The immediate data associated with an RDMA operation is 32 bits and is divided as follows:
 // | 4-bit MSG TYPE flag | 8-bit agent index | 16-bit XFER_ID | 4-bit SEQ_ID |
