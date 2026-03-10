@@ -93,7 +93,7 @@
      (((uint64_t)(xfer_id) & NIXL_XFER_ID_MASK) << NIXL_XFER_ID_SHIFT) |           \
      (((uint64_t)(seq_id) & NIXL_SEQ_ID_MASK) << NIXL_SEQ_ID_SHIFT))
 
-#define NIXL_LIBFABRIC_CQ_BATCH_SIZE 16
+#define NIXL_LIBFABRIC_CQ_BATCH_SIZE 32
 
 // MR cache configuration
 #define NIXL_LIBFABRIC_MR_CACHE_MAX_SIZE 128
