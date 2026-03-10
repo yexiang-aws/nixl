@@ -771,6 +771,7 @@ nixlLibfabricRail::progressCompletionQueue() const {
     }
 
     if (ret > 0) {
+        telemetry_.cq_drain_depth.fetch_add(ret, std::memory_order_relaxed);
         for (int i = 0; i < ret; ++i) {
             // Process completion using local data. Callbacks have their own thread safety
             nixl_status_t status = processCompletionQueueEntry(&completions[i]);
@@ -1043,6 +1044,9 @@ nixlLibfabricRail::retryFabricOp(FabricOp &&op, const char *op_name) const {
         int ret = op();
 
         if (ret == 0) {
+            if (attempt > 0) {
+                telemetry_.retry_count.fetch_add(1, std::memory_order_relaxed);
+            }
             NIXL_TRACE << op_name << " posted successfully"
                        << (attempt > 0 ? " after " + std::to_string(attempt + 1) + " attempts" :
                                          "");
@@ -1054,6 +1058,7 @@ nixlLibfabricRail::retryFabricOp(FabricOp &&op, const char *op_name) const {
             return NIXL_ERR_BACKEND;
         }
 
+        telemetry_.eagain_count.fetch_add(1, std::memory_order_relaxed);
         attempt++;
         if (attempt >= NIXL_LIBFABRIC_EAGAIN_MAX_RETRIES) {
             NIXL_ERROR << op_name << " exceeded max retries ("
@@ -1123,12 +1128,16 @@ nixlLibfabricRail::postWrite(const void *local_buffer,
                << " dest_addr=" << dest_addr << " remote_addr=" << (void *)remote_addr
                << " remote_key=" << remote_key << " context=" << &req->ctx;
 
-    return retryFabricOp(
+    nixl_status_t status = retryFabricOp(
         [&]() {
             return fi_writedata(endpoint, local_buffer, length, local_desc, immediate_data,
                                 dest_addr, remote_addr, remote_key, &req->ctx);
         },
         "fi_writedata");
+    if (status == NIXL_SUCCESS) {
+        telemetry_.bytes_transferred.fetch_add(length, std::memory_order_relaxed);
+    }
+    return status;
 }
 
 nixl_status_t
@@ -1150,12 +1159,16 @@ nixlLibfabricRail::postRead(void *local_buffer,
                << " dest_addr=" << dest_addr << " remote_addr=" << (void *)remote_addr
                << " remote_key=" << remote_key << " context=" << &req->ctx;
 
-    return retryFabricOp(
+    nixl_status_t status = retryFabricOp(
         [&]() {
             return fi_read(endpoint, local_buffer, length, local_desc, dest_addr, remote_addr,
                            remote_key, &req->ctx);
         },
         "fi_read");
+    if (status == NIXL_SUCCESS) {
+        telemetry_.bytes_transferred.fetch_add(length, std::memory_order_relaxed);
+    }
+    return status;
 }
 
 // Memory Registration Methods

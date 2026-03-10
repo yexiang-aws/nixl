@@ -1458,11 +1458,19 @@ nixl_status_t
 nixlLibfabricEngine::progressThread() {
     NIXL_DEBUG << "PT: Thread started successfully for rails only";
     unsigned int idle_count = 0;
+    unsigned int progress_count = 0;
     // Main progress loop with adaptive polling: spin, then backoff progressively
     while (!progress_thread_stop_.load()) {
         nixl_status_t status = rail_manager.progressActiveRails();
         if (status == NIXL_SUCCESS) {
             idle_count = 0; // Reset on completions — stay in spin phase
+            ++progress_count;
+            if (enableTelemetry_ && (progress_count % 1000 == 0)) {
+                rail_manager.flushTelemetry(
+                    [this](const std::string &name, uint64_t value) {
+                        addTelemetryEvent(name, value);
+                    });
+            }
             continue;
         }
         if (status != NIXL_IN_PROG) {

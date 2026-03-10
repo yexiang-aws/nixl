@@ -312,6 +312,10 @@ public:
     size_t
     getActiveRailCount() const;
 
+    /** Flush per-rail telemetry counters via callback, resetting after read */
+    void
+    flushTelemetry(std::function<void(const std::string &, uint64_t)> emit);
+
     // Memory Descriptor APIs
     /** Get memory descriptor for specified rail and MR */
     struct fid_mr *

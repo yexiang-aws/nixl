@@ -22,6 +22,7 @@
 #include <string>
 #include <functional>
 #include <mutex>
+#include <atomic>
 #include <ostream>
 #include <stack>
 
@@ -234,6 +235,14 @@ operator<<(std::ostream &os, const ConnectionState &state) {
     }
 }
 
+/** Per-rail telemetry counters for bandwidth and EAGAIN tracking */
+struct RailTelemetry {
+    std::atomic<uint64_t> bytes_transferred{0}; ///< Total bytes posted for transfer
+    std::atomic<uint64_t> eagain_count{0}; ///< Total FI_EAGAIN returns
+    std::atomic<uint64_t> retry_count{0}; ///< Operations that required at least one retry
+    std::atomic<uint64_t> cq_drain_depth{0}; ///< Total completions drained from CQ
+};
+
 /** Individual libfabric rail managing fabric, domain, endpoint, CQ, and AV */
 class nixlLibfabricRail {
 public:
@@ -361,6 +370,12 @@ public:
     fi_info *
     getRailInfo() const;
 
+    /** Get per-rail telemetry counters */
+    RailTelemetry &
+    getTelemetry() {
+        return telemetry_;
+    }
+
 private:
     // Core libfabric resources
     struct fi_info *info; // from rail_infos[rail_id]
@@ -400,6 +415,9 @@ private:
     processRecvCompletion(struct fi_cq_data_entry *comp) const;
     nixl_status_t
     processRemoteWriteCompletion(struct fi_cq_data_entry *comp) const;
+
+    // Per-rail telemetry counters
+    mutable RailTelemetry telemetry_;
 };
 
 

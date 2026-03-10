@@ -1282,6 +1282,24 @@ nixlLibfabricRailManager::getActiveRailCount() const {
     return __builtin_popcountll(active_rails_mask_.load(std::memory_order_relaxed));
 }
 
+void
+nixlLibfabricRailManager::flushTelemetry(
+    std::function<void(const std::string &, uint64_t)> emit) {
+    for (size_t i = 0; i < rails_.size(); ++i) {
+        RailTelemetry &t = rails_[i]->getTelemetry();
+        std::string prefix = "rail_" + std::to_string(i) + "_";
+        uint64_t val;
+        val = t.bytes_transferred.exchange(0, std::memory_order_relaxed);
+        if (val) emit(prefix + "bytes_transferred", val);
+        val = t.eagain_count.exchange(0, std::memory_order_relaxed);
+        if (val) emit(prefix + "eagain_count", val);
+        val = t.retry_count.exchange(0, std::memory_order_relaxed);
+        if (val) emit(prefix + "retry_count", val);
+        val = t.cq_drain_depth.exchange(0, std::memory_order_relaxed);
+        if (val) emit(prefix + "cq_drain_depth", val);
+    }
+}
+
 // System accelerator type getter
 fi_hmem_iface
 nixlLibfabricRailManager::getRuntime() const {
