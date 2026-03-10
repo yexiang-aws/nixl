@@ -95,6 +95,10 @@
 
 #define NIXL_LIBFABRIC_CQ_BATCH_SIZE 32
 
+// Adaptive progress thread polling constants
+#define NIXL_LIBFABRIC_PROGRESS_SPIN_COUNT 64 // Spin iterations before backoff
+#define NIXL_LIBFABRIC_PROGRESS_INITIAL_BACKOFF_US 1 // Initial backoff in microseconds
+
 // MR cache configuration
 #define NIXL_LIBFABRIC_MR_CACHE_MAX_SIZE 128
 

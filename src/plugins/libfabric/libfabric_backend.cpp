@@ -25,6 +25,7 @@
 #include <limits>
 #include <cstring>
 #include <unistd.h>
+#include <sched.h>
 
 #include <iomanip>
 #include <numeric>
@@ -1431,20 +1432,29 @@ nixlLibfabricEngine::getNotifs(notif_list_t &notif_list) {
 nixl_status_t
 nixlLibfabricEngine::progressThread() {
     NIXL_DEBUG << "PT: Thread started successfully for rails only";
-    // Main progress loop - continuously process completions only on rails
+    unsigned int idle_count = 0;
+    // Main progress loop with adaptive polling: spin, then backoff progressively
     while (!progress_thread_stop_.load()) {
-        // Process completions only on rails (non-blocking)
-        bool any_completions = false;
         nixl_status_t status = rail_manager.progressActiveRails();
         if (status == NIXL_SUCCESS) {
-            any_completions = true;
-            NIXL_DEBUG << "PT: Processed completions on rails";
-        } else if (status != NIXL_IN_PROG && status != NIXL_SUCCESS) {
-            NIXL_ERROR << "PT: Failed to process completions on rails";
-            // Don't return error, continue for robustness
+            idle_count = 0; // Reset on completions — stay in spin phase
+            continue;
         }
-        if (!any_completions) {
-            std::this_thread::sleep_for(progress_thread_delay_);
+        if (status != NIXL_IN_PROG) {
+            NIXL_ERROR << "PT: Failed to process completions on rails";
+        }
+        // No completions: adaptive backoff
+        ++idle_count;
+        if (idle_count <= NIXL_LIBFABRIC_PROGRESS_SPIN_COUNT) {
+            sched_yield();
+        } else {
+            // Exponential backoff capped at configured delay
+            unsigned int shift = std::min(idle_count - NIXL_LIBFABRIC_PROGRESS_SPIN_COUNT - 1, 20u);
+            long long backoff_us = static_cast<long long>(NIXL_LIBFABRIC_PROGRESS_INITIAL_BACKOFF_US) << shift;
+            if (backoff_us > progress_thread_delay_.count()) {
+                backoff_us = progress_thread_delay_.count();
+            }
+            std::this_thread::sleep_for(std::chrono::microseconds(backoff_us));
         }
     }
     NIXL_DEBUG << "PT: Thread exiting cleanly";
