@@ -21,7 +21,6 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
-#include <unordered_set>
 #include <functional>
 #include <mutex>
 #include <atomic>
@@ -395,9 +394,8 @@ private:
     // EFA device to rail mapping
     std::unordered_map<std::string, size_t> efa_device_to_rail_map;
 
-    // Active Rail Tracking System
-    std::unordered_set<size_t> active_rails_;
-    mutable std::mutex active_rails_mutex_;
+    // Active Rail Tracking System (lock-free bitmask, supports up to 64 rails)
+    std::atomic<uint64_t> active_rails_mask_{0};
 
     // MR cache with LRU eviction and refcounting
     std::unordered_map<MrCacheKey, MrCacheEntry, MrCacheKeyHash> mr_cache_;
