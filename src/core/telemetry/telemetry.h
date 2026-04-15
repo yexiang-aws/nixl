@@ -72,6 +72,8 @@ public:
     addXferTime(std::chrono::microseconds transaction_time, bool is_write, uint64_t bytes);
     void
     addPostTime(std::chrono::microseconds post_time);
+    void
+    addBackendEvents(std::vector<nixlTelemetryEvent> &&backend_events);
 
 private:
     void

@@ -27,7 +27,7 @@
 #include "backend_aux.h"
 #include "telemetry_event.h"
 
-constexpr size_t MAX_TELEMETRY_QUEUE_SIZE = 1000;
+constexpr size_t MAX_TELEMETRY_QUEUE_SIZE = 100000;
 
 // Base backend engine class for different backend implementations
 class nixlBackendEngine {

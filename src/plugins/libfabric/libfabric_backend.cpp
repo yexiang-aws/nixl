@@ -17,6 +17,7 @@
  */
 
 #include "libfabric_backend.h"
+#include "libfabric/libfabric_tracepoints.h"
 #include "serdes/serdes.h"
 #include "common/configuration.h"
 #include "common/nixl_log.h"
@@ -304,6 +305,15 @@ nixlLibfabricEngine::nixlLibfabricEngine(const nixlBackendInitParams *init_param
 
     // Query system runtime type from rail manager (determined once at topology discovery)
     runtime_ = rail_manager.getRuntime();
+
+    // Wire telemetry tracepoints to backend engine's telemetry system.
+    // Order matters: set callback first, then enable the atomic guard.
+    if (enableTelemetry_) {
+        g_nixl_libfabric_telemetry_cb = [this](const char *name, uint64_t val) {
+            addTelemetryEvent(name, val);
+        };
+        g_nixl_libfabric_telemetry_enabled.store(true, std::memory_order_release);
+    }
 
     NIXL_INFO << "System runtime: "
               << (runtime_ == FI_HMEM_CUDA       ? "CUDA" :
@@ -1070,6 +1080,7 @@ nixlLibfabricEngine::postXfer(const nixl_xfer_op_t &operation,
             conn_it->second->rail_remote_addr_list_,
             conn_it->second->agent_index_,
             backend_handle->post_xfer_id,
+            device_id,
             [backend_handle]() {
                 backend_handle->increment_completed_requests();
             }, // Completion callback
@@ -1619,6 +1630,9 @@ nixlLibfabricEngine::checkPendingNotifications() {
 
 void
 nixlLibfabricEngine::cleanup() {
+    // Disable telemetry first (atomic), then clear callback.
+    g_nixl_libfabric_telemetry_enabled.store(false, std::memory_order_release);
+    g_nixl_libfabric_telemetry_cb = nullptr;
     NIXL_DEBUG << "Cleaning up all resources";
 #ifdef HAVE_CUDA
     // Cleanup CUDA context

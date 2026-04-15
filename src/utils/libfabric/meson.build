@@ -37,6 +37,9 @@ hwloc_dep = dependency('hwloc', required: true)
 # Find numa dependency
 numa_dep = dependency('numa', required: true)
 
+# Telemetry-based tracepoints (always compiled, no external dependency)
+libfabric_utils_sources += files('libfabric_tracepoints.cpp')
+
 # Set up dependencies and compile args
 libfabric_utils_deps = [
     libfabric_dep,
@@ -46,6 +49,7 @@ libfabric_utils_deps = [
 ]
 
 libfabric_utils_cpp_args = []
+
 
 # Detect optional libfabric features at compile time to enable/disable
 # functionality based on the installed libfabric version

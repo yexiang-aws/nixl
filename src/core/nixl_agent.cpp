@@ -120,6 +120,9 @@ nixlXferReqH::updateRequestStats(nixlTelemetry *telemetry_pub,
     if (telemetry_pub && (stat_status != NIXL_TELEMETRY_POST)) {
         telemetry_pub->addPostTime(telemetry.postDuration);
         telemetry_pub->addXferTime(duration, backendOp == NIXL_WRITE, telemetry.totalBytes);
+        // Drain backend-level telemetry events (e.g., fine-grained tracepoints)
+        auto backend_events = engine->getTelemetryEvents();
+        telemetry_pub->addBackendEvents(std::move(backend_events));
     }
 
     NIXL_TRACE << "[NIXL TELEMETRY]: From backend " << engine->getType()

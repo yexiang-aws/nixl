@@ -267,3 +267,12 @@ nixlEnumStrings::telemetryCategoryStr(const nixl_telemetry_category_t &category)
     if (category_int >= nixl_telemetry_category_str.size()) return "BAD_CATEGORY";
     return nixl_telemetry_category_str[category_int];
 }
+
+void
+nixlTelemetry::addBackendEvents(std::vector<nixlTelemetryEvent> &&backend_events) {
+    if (backend_events.empty()) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    events_.insert(events_.end(),
+                   std::make_move_iterator(backend_events.begin()),
+                   std::make_move_iterator(backend_events.end()));
+}
